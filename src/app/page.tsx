@@ -1,13 +1,5 @@
 import Link from "next/link";
 
-export default function Home() {
-  const keyOutcomes = [
-    "Catch bugs before human review starts",
-    "Flag security vulnerabilities and risky patterns",
-    "Enforce architecture rules with low false positives",
-    "Generate contextual, actionable inline comments",
-  ];
-
 const features = [
   {
     title: "Async PR Intelligence",
