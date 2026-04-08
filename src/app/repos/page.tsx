@@ -1,7 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import TopBar from "@/components/TopBar";
+import type { PipelineSnapshot } from "@/lib/pipeline/types";
+import PipelineFlowDiagram from "@/components/pipeline/PipelineFlowDiagram";
+import LivePipelineTerminal from "@/components/pipeline/LivePipelineTerminal";
 
 interface PullRequestSummary {
   number: number;
@@ -30,56 +33,24 @@ interface TollGatePipelineResult {
   pr?: { url?: string; number?: number; files?: string[] };
 }
 
-const repos = [
-  {
-    icon: "folder_special",
-    name: "tollgate-api-core",
-    branch: "main",
-    synced: "2m ago",
-    language: "TypeScript",
-    prs: 3,
-    issues: 1,
-    coverage: 92,
-    active: true,
-    commits: [
-      { sha: "a4f2e1c", msg: "fix: null-check in auth middleware", author: "jdoe", time: "8m ago" },
-      { sha: "88d09b5", msg: "feat: add RAG context injection", author: "kpatel", time: "2h ago" },
-      { sha: "f3c11da", msg: "chore: bump langchain to 0.2.4", author: "jdoe", time: "6h ago" },
-    ],
+const emptySnapshot = (): PipelineSnapshot => ({
+  steps: {
+    code_push: "idle",
+    architect: "idle",
+    scripter: "idle",
+    tests_gate: "idle",
+    courier: "idle",
+    watchdog: "idle",
+    healer: "idle",
+    confidence_gate: "idle",
+    ship: "idle",
+    block: "idle",
   },
-  {
-    icon: "account_tree",
-    name: "frontend-mission-control",
-    branch: "staging",
-    language: "Next.js",
-    synced: "45m ago",
-    prs: 1,
-    issues: 4,
-    coverage: 78,
-    active: false,
-    commits: [
-      { sha: "c91ae3f", msg: "ui: refactor dashboard grid layout", author: "mgupta", time: "1h ago" },
-      { sha: "7e2ab01", msg: "fix: sidebar active state hydration", author: "jdoe", time: "4h ago" },
-      { sha: "39bcd7e", msg: "chore: update Tailwind config", author: "mgupta", time: "1d ago" },
-    ],
-  },
-  {
-    icon: "schema",
-    name: "data-pipeline-v4",
-    branch: "production",
-    language: "Python",
-    synced: "12s ago",
-    prs: 0,
-    issues: 2,
-    coverage: 85,
-    active: true,
-    commits: [
-      { sha: "52f8c4d", msg: "perf: vectorise healer embeddings", author: "kpatel", time: "30m ago" },
-      { sha: "d1b07c3", msg: "fix: MongoDB vector index timeout", author: "jdoe", time: "3h ago" },
-      { sha: "ae44081", msg: "feat: store fix from API endpoint", author: "kpatel", time: "8h ago" },
-    ],
-  },
-];
+  afterTests: null,
+  afterConfidence: null,
+  logs: [],
+  updatedAt: 0,
+});
 
 export default function ReposPage() {
   const [owner, setOwner] = useState("harshkg23");
@@ -88,9 +59,13 @@ export default function ReposPage() {
     () =>
       process.env.NEXT_PUBLIC_TOLLGATE_TARGET_URL ??
       process.env.NEXT_PUBLIC_SENTINELQA_TARGET_URL ??
-      "",
+      "http://localhost:3000",
   );
   const [slackChannel, setSlackChannel] = useState("#new-channel");
+
+  // SSE Pipeline state
+  const [snapshot, setSnapshot] = useState<PipelineSnapshot>(emptySnapshot);
+  const [sseOk, setSseOk] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -117,6 +92,21 @@ export default function ReposPage() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    const es = new EventSource("/api/agent/pipeline/events");
+    es.onmessage = (ev) => {
+      try {
+        setSnapshot(JSON.parse(ev.data) as PipelineSnapshot);
+        setSseOk(true);
+      } catch {
+        /* ignore */
+      }
+    };
+    es.onerror = () => setSseOk(false);
+    return () => es.close();
+  }, []);
+
   const [mode, setMode] = useState<"npx" | "docker">("npx");
   const [tone, setTone] = useState("Direct and concise");
 
@@ -195,30 +185,70 @@ export default function ReposPage() {
     }
   }
 
-  function useRepoFromCard(name: string) {
-    setRepoName(name);
-    setPullRequests([]);
-    setSelectedPr(null);
-    setResult(null);
-    setError("");
-    void loadPullRequestsFor(owner, name);
-  }
+  const simulate = useCallback(async () => {
+    await fetch("/api/agent/pipeline/simulate", { method: "POST" });
+  }, []);
+
+  const resetPipeline = useCallback(async () => {
+    await fetch("/api/agent/pipeline/webhook", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "reset" }),
+    });
+  }, []);
 
   return (
-    <>
+    <div className="min-h-screen flex flex-col bg-[var(--bg-base)]">
       <TopBar activeLabel="Repositories" />
 
-      <main className="p-8 space-y-8 max-w-[1600px]">
+      <main className="flex-1 flex flex-col min-h-0 px-4 py-8 md:px-8 max-w-[1600px] mx-auto w-full space-y-8">
         <header className="flex justify-between items-end">
           <div className="space-y-1">
             <h1 className="text-4xl font-headline font-bold tracking-tight text-fg-1">Repositories</h1>
             <p className="font-mono text-[11px] text-fg-4 uppercase tracking-widest">
-              Watched repos · AI review pipeline · same flow as dashboard
+              Review pipeline runner
             </p>
+          </div>
+          
+          <div className="flex items-center gap-3">
+             <span
+              className={`inline-flex items-center gap-1.5 font-mono text-[9px] px-2.5 py-1 rounded-full border ${
+                sseOk
+                  ? "border-pos/40 text-pos bg-pos/5"
+                  : "border-[var(--bd)] text-fg-4 bg-[var(--bg-elevated)]"
+              }`}
+            >
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${sseOk ? "bg-pos animate-pulse" : "bg-fg-4"}`}
+              />
+              {sseOk ? "Live" : "Connecting…"}
+            </span>
+
+            <button
+              type="button"
+              onClick={simulate}
+              className="bg-[var(--bg-elevated)] border border-[var(--bd)] text-fg-2 font-mono font-bold text-[11px] uppercase tracking-wider py-1.5 px-3 rounded-lg flex items-center gap-2 hover:border-[var(--bd-2)] active:scale-95 transition-all"
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: "14px" }}>
+                play_arrow
+              </span>
+              Simulate
+            </button>
+
+            <button
+              type="button"
+              onClick={resetPipeline}
+              className="bg-[var(--bg-elevated)] border border-[var(--bd)] text-fg-2 font-mono font-bold text-[11px] uppercase tracking-wider py-1.5 px-3 rounded-lg flex items-center gap-2 hover:border-[var(--bd-2)] active:scale-95 transition-all"
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: "14px" }}>
+                refresh
+              </span>
+              Reset
+            </button>
           </div>
         </header>
 
-        {/* Pipeline + PR loader (matches /dashboard Pipeline Runner) */}
+        {/* Pipeline + PR loader */}
         <section className="glass-panel rounded-xl p-6 border-l-2 border-accent space-y-5">
           <h2 className="font-headline text-base font-bold text-fg-1 flex items-center gap-2">
             <span className="material-symbols-outlined text-accent" style={{ fontSize: "18px" }}>
@@ -339,6 +369,7 @@ export default function ReposPage() {
               )}
             </button>
           </div>
+
           <p className="font-mono text-[9px] text-fg-4 -mt-1">
             Start pipeline needs a PR, owner, repo, and Target URL. If the button stays faded, fill
             Target URL or set{" "}
@@ -492,101 +523,32 @@ export default function ReposPage() {
           ) : null}
         </section>
 
-        {/* Repo cards */}
-        <div className="space-y-6">
-          {repos.map((repo) => (
-            <div
-              key={repo.name}
-              className={`glass-panel rounded-xl overflow-hidden border-l-2 ${
-                repo.active ? "border-accent" : "border-[var(--bd-2)]"
-              }`}
-            >
-              <div className="px-6 py-5 border-b border-[var(--bd)] flex flex-wrap gap-4 items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-lg bg-[var(--bg-elevated)] flex items-center justify-center">
-                    <span className="material-symbols-outlined text-fg-3" style={{ fontSize: "20px" }}>
-                      {repo.icon}
-                    </span>
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2.5">
-                      <span className="font-mono text-sm font-bold text-fg-1">{repo.name}</span>
-                      {repo.active ? <div className="w-1.5 h-1.5 rounded-full bg-pos animate-pulse" /> : null}
-                    </div>
-                    <div className="flex items-center gap-3 mt-0.5 font-mono text-[9px] text-fg-4 uppercase tracking-widest">
-                      <span>Branch: {repo.branch}</span>
-                      <span className="w-px h-3 bg-[var(--bd)]" />
-                      <span>Synced {repo.synced}</span>
-                      <span className="w-px h-3 bg-[var(--bd)]" />
-                      <span>{repo.language}</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-1.5 bg-[var(--bg-elevated)] px-3 py-1.5 rounded-lg font-mono text-[10px] text-fg-3">
-                    <span className="material-symbols-outlined text-accent" style={{ fontSize: "13px" }}>
-                      rebase
-                    </span>
-                    {repo.prs} PRs
-                  </div>
-                  <div className="flex items-center gap-1.5 bg-[var(--bg-elevated)] px-3 py-1.5 rounded-lg font-mono text-[10px] text-fg-3">
-                    <span className="material-symbols-outlined text-warn" style={{ fontSize: "13px" }}>
-                      bug_report
-                    </span>
-                    {repo.issues} Issues
-                  </div>
-                  <div className="flex items-center gap-1.5 bg-[var(--bg-elevated)] px-3 py-1.5 rounded-lg font-mono text-[10px] text-fg-3">
-                    <span className="material-symbols-outlined text-pos" style={{ fontSize: "13px" }}>
-                      verified
-                    </span>
-                    {repo.coverage}% Coverage
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => useRepoFromCard(repo.name)}
-                    className="ml-2 px-4 py-1.5 bg-[var(--accent-soft)] hover:bg-accent hover:text-white border border-accent/20 text-accent rounded-lg font-mono text-[10px] uppercase tracking-widest transition-all"
-                  >
-                    Use in pipeline
-                  </button>
-                </div>
-              </div>
-
-              <div className="px-6 py-2 bg-[var(--bg-elevated)] border-b border-[var(--bd)] flex items-center gap-3">
-                <span className="font-mono text-[9px] text-fg-4 uppercase tracking-widest shrink-0">
-                  Coverage
-                </span>
-                <div className="flex-1 bg-[var(--bg-card)] h-1 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-accent rounded-full transition-all"
-                    style={{ width: `${repo.coverage}%` }}
-                  />
-                </div>
-                <span className="font-mono text-[9px] text-accent">{repo.coverage}%</span>
-              </div>
-
-              <div className="divide-y divide-[var(--bd)]">
-                {repo.commits.map((c) => (
-                  <div
-                    key={c.sha}
-                    className="flex items-center gap-4 px-6 py-3 hover:bg-[var(--bg-elevated)] transition-colors"
-                  >
-                    <span className="font-mono text-[10px] text-data shrink-0 tabular-nums">{c.sha}</span>
-                    <span className="material-symbols-outlined text-fg-3 shrink-0" style={{ fontSize: "14px" }}>
-                      commit
-                    </span>
-                    <span className="flex-1 font-mono text-[11px] text-fg-2 truncate">{c.msg}</span>
-                    <span className="font-mono text-[9px] text-fg-4 shrink-0">@{c.author}</span>
-                    <span className="font-mono text-[9px] text-fg-4 shrink-0 w-16 text-right">
-                      {c.time}
-                    </span>
-                  </div>
-                ))}
-              </div>
+        {/* 60 / 40 split — flow | terminal */}
+        <div className="grid grid-cols-1 lg:grid-cols-[3fr_2fr] gap-5 flex-1 min-h-[500px]">
+          {/* ── Flow Diagram (60%) ── */}
+          <section className="flex flex-col min-h-[min(60vh,560px)] lg:min-h-0 min-w-0 rounded-2xl border border-[var(--glass-bd)] overflow-hidden" style={{ background: "#08090f" }}>
+            <div className="shrink-0 px-4 py-2.5 border-b flex items-center gap-2" style={{ borderColor: "rgba(255,255,255,0.06)", background: "#0d0e1a" }}>
+              <span className="material-symbols-outlined text-accent" style={{ fontSize: "15px" }}>
+                account_tree
+              </span>
+              <span className="font-mono text-[10px] uppercase tracking-widest font-bold" style={{ color: "rgba(255,255,255,0.8)" }}>
+                Live Agent Flow
+              </span>
+              <span className="ml-auto font-mono text-[9px] font-medium" style={{ color: "rgba(255,255,255,0.5)" }}>
+                Multi-agent orchestration
+              </span>
             </div>
-          ))}
+            <div className="flex-1 min-h-0 w-full p-2">
+              <PipelineFlowDiagram snapshot={snapshot} />
+            </div>
+          </section>
+
+          {/* ── Terminal (40%) ── */}
+          <section className="flex flex-col min-h-[min(48vh,440px)] lg:min-h-0 min-w-0">
+            <LivePipelineTerminal snapshot={snapshot} className="flex-1 min-h-0" />
+          </section>
         </div>
       </main>
-    </>
+    </div>
   );
 }

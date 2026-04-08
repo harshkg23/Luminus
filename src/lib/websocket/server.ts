@@ -78,6 +78,9 @@ export function getIO(httpServer?: HTTPServer): SocketIOServer | null {
 
 // ── Event Emitter ───────────────────────────────────────────────────────────
 
+import { applyPipelineWebhook, resetPipeline } from "@/lib/pipeline/state";
+import { AgentEvent, CourierEvent, PipelineEvent } from "./events";
+
 /**
  * Broadcast an event to all clients listening to a specific session.
  * Safe to call even when no clients are connected (no-op).
@@ -87,6 +90,54 @@ export function emitSessionEvent(
   event: WSEventName,
   payload: WSEventPayload
 ): void {
+  try {
+    if (event === "pipeline.started") {
+      resetPipeline();
+      applyPipelineWebhook({ step: "code_push", status: "running", message: "Pipeline requested" });
+      applyPipelineWebhook({ step: "code_push", status: "completed" });
+    } else if (event === "agent.started") {
+      const p = payload as AgentEvent;
+      if (p.agent_name === "architect") applyPipelineWebhook({ step: "architect", status: "running", message: p.message });
+      else if (p.agent_name === "scripter") applyPipelineWebhook({ step: "scripter", status: "running", message: p.message });
+      else if (p.agent_name === "playwright") applyPipelineWebhook({ step: "tests_gate", status: "running", message: p.message });
+      else if (p.agent_name === "healer") applyPipelineWebhook({ step: "healer", status: "running", message: p.message });
+      else if (p.agent_name === "test-writer") applyPipelineWebhook({ step: "confidence_gate", status: "running", message: p.message });
+    } else if (event === "agent.completed") {
+      const p = payload as AgentEvent;
+      if (p.agent_name === "architect") applyPipelineWebhook({ step: "architect", status: "completed", message: p.message });
+      else if (p.agent_name === "scripter") applyPipelineWebhook({ step: "scripter", status: "completed", message: p.message });
+      else if (p.agent_name === "playwright") {
+        const isFail = p.message?.includes("0 passed") || p.message?.includes("fail");
+        applyPipelineWebhook({ 
+          step: "tests_gate", status: "completed", message: p.message,
+          branch: isFail ? "failure" : "success", path: isFail ? "watchdog" : "courier"
+        });
+        if (isFail) {
+          applyPipelineWebhook({ step: "watchdog", status: "running", message: "Watchdog: tests failed, paging SRE..." });
+          setTimeout(() => applyPipelineWebhook({ step: "watchdog", status: "completed" }), 100);
+        }
+      }
+      else if (p.agent_name === "healer") applyPipelineWebhook({ step: "healer", status: "completed", message: p.message });
+      else if (p.agent_name === "test-writer") applyPipelineWebhook({ 
+        step: "confidence_gate", status: "completed", message: p.message, branch: "success", outcome: "ship"
+      });
+    } else if (event === "courier.issue_created" || event === "courier.pr_created") {
+      const p = payload as CourierEvent;
+      const isPr = event === "courier.pr_created";
+      applyPipelineWebhook({
+        step: isPr ? "ship" : "courier", status: "running", message: `Opening ${p.type}...`
+      });
+      setTimeout(() => applyPipelineWebhook({
+        step: isPr ? "ship" : "courier", status: "completed", message: `Created ${p.type} ${p.url || ""}`
+      }), 100);
+    } else if (event === "pipeline.completed") {
+      const p = payload as PipelineEvent;
+      applyPipelineWebhook({ step: "ship", status: "completed", message: `Pipeline completed with status: ${p.status}` });
+    }
+  } catch (e) {
+    console.warn("Error bridging event:", e);
+  }
+
   const io = getIO();
   if (!io) return; // No WS server yet — silently skip
   io.to(`session:${sessionId}`).emit(event, payload);

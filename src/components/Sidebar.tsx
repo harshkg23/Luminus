@@ -77,23 +77,6 @@ export default function Sidebar() {
           Deploy Agent
         </button>
 
-        {/* Utility */}
-        <div className="space-y-0.5">
-          {[{ icon: "terminal", label: "Logs" }, { icon: "code", label: "Terminal" }].map(
-            ({ icon, label }) => (
-              <button
-                key={label}
-                className="w-full flex items-center gap-3 px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-fg-4 hover:text-accent hover:bg-[var(--accent-soft)] rounded transition-all"
-              >
-                <span className="material-symbols-outlined" style={{ fontSize: "14px" }}>
-                  {icon}
-                </span>
-                {label}
-              </button>
-            )
-          )}
-        </div>
-
         {/* User row */}
         <div className="flex items-center gap-2.5 px-1 pt-2 border-t border-[var(--bd)]">
           {session?.user?.image ? (
