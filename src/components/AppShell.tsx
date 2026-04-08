@@ -7,7 +7,27 @@ import Sidebar from "./Sidebar";
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   if (pathname.startsWith("/auth")) return <>{children}</>;
+  /* TollGate-style dashboard: full viewport, own sidebar (matches Hack-nocturne). */
+  if (pathname.startsWith("/dashboard")) return <ProtectedShellFullWidth>{children}</ProtectedShellFullWidth>;
   return <ProtectedShell>{children}</ProtectedShell>;
+}
+
+function ProtectedShellFullWidth({ children }: { children: React.ReactNode }) {
+  const { status } = useSession({ required: true });
+
+  if (status === "loading") {
+    return (
+      <div className="min-h-screen bg-base flex items-center justify-center">
+        <div className="w-9 h-9 rounded-lg bg-accent/10 flex items-center justify-center">
+          <span className="material-symbols-outlined text-accent animate-spin" style={{ fontSize: "22px" }}>
+            progress_activity
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  return <>{children}</>;
 }
 
 function ProtectedShell({ children }: { children: React.ReactNode }) {

@@ -31,7 +31,10 @@ def assert_contains(text: str, expected: str, label: str) -> None:
 
 
 def backend_available() -> bool:
-    base_url = os.getenv("SENTINEL_BACKEND_URL", "http://localhost:3000").strip().rstrip("/")
+    base_url = (
+        os.getenv("TOLLGATE_BACKEND_URL", "").strip()
+        or os.getenv("SENTINEL_BACKEND_URL", "http://localhost:3000").strip()
+    ).rstrip("/")
     if not base_url:
         return False
 
@@ -59,12 +62,22 @@ def main() -> None:
     if env_with_key.get("OPENAI_API_KEY", "").strip():
         code, out, err = run([str(PYTHON), "main.py", "--mock-tests"], env=env_with_key)
         if code != 0:
-            print("[SKIP] Live OpenAI verification unavailable in this environment")
+            hint = (
+                " If you use LLM_REAL_ONLY=true, any API error fails the run; "
+                "try LLM_REAL_ONLY=false temporarily to confirm."
+            )
+            tail = (err or out or "").strip()
+            if len(tail) > 1200:
+                tail = tail[-1200:]
+            print(
+                "[SKIP] Live OpenAI check: main.py --mock-tests exited "
+                f"{code}.{hint}\n--- output (tail) ---\n{tail or '(no output)'}"
+            )
         else:
             assert_contains(out, "--- TEST PLAN ---", "with-key run")
             checks_passed += 1
     else:
-        print("[SKIP] OPENAI_API_KEY not set for live-key check")
+        print("[SKIP] OPENAI_API_KEY not set for live-key check (loaded .env may be overridden by empty env var)")
 
     # 3) Explicit Architect fallback
     code, out, err = run([str(PYTHON), "main.py", "--force-mock", "--mock-tests"], env=fallback_env)

@@ -17,11 +17,14 @@ load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 
 def _backend_url() -> str:
-    raw = os.getenv("SENTINEL_BACKEND_URL", "http://localhost:3000")
-    value = raw.strip().rstrip("/")
+    raw = (
+        os.getenv("TOLLGATE_BACKEND_URL", "").strip()
+        or os.getenv("SENTINEL_BACKEND_URL", "http://localhost:3000").strip()
+    )
+    value = raw.rstrip("/")
     if not value:
         raise ValueError(
-            "SENTINEL_BACKEND_URL environment variable is empty or only whitespace; please set it to a valid backend URL."
+            "TOLLGATE_BACKEND_URL or SENTINEL_BACKEND_URL must be set to a valid backend URL."
         )
     return value
 
@@ -92,7 +95,7 @@ def courier_execute_node(state: SentinelState) -> dict[str, object]:
                         subprocess.run(["git", "add", "-A"], cwd=repo_root, check=True)
                         session_id = dispatch_payload.get("session_id", "unknown")
                         subprocess.run(
-                            ["git", "commit", "-m", f"[SentinelQA] Auto-fix for {session_id}"],
+                            ["git", "commit", "-m", f"[TollGate] Auto-fix for {session_id}"],
                             cwd=repo_root,
                             check=True,
                         )

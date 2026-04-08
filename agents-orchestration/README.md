@@ -1,6 +1,6 @@
 # AI Engine (Aaskar)
 
-This folder contains the Python LangGraph service for SentinelQA.
+This folder contains the Python LangGraph service for TollGate.
 
 Current workflow:
 `Architect -> Run Tests -> Decision`
@@ -58,7 +58,8 @@ Prerequisites:
 Required `.env` values:
 ```env
 RUN_TESTS_MODE=api
-SENTINEL_BACKEND_URL=http://localhost:3000
+# Next.js API base (prefer TOLLGATE_BACKEND_URL; SENTINEL_BACKEND_URL still works)
+TOLLGATE_BACKEND_URL=http://localhost:3000
 TARGET_URL=http://localhost:3000
 RUN_TESTS_TIMEOUT_SECONDS=60
 ```
