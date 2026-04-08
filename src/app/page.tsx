@@ -1,5 +1,13 @@
 import Link from "next/link";
 
+export default function Home() {
+  const keyOutcomes = [
+    "Catch bugs before human review starts",
+    "Flag security vulnerabilities and risky patterns",
+    "Enforce architecture rules with low false positives",
+    "Generate contextual, actionable inline comments",
+  ];
+
 const features = [
   {
     title: "Async PR Intelligence",
@@ -83,16 +91,19 @@ export default function Home() {
               feedback your team can act on immediately.
             </p>
 
-            <div className="mt-8 flex flex-wrap gap-3">
+            <div className="flex flex-wrap gap-3">
               <Link
-                href="/auth"
-                className="rounded-xl bg-gradient-to-r from-cyan-400 to-blue-500 px-6 py-3 text-sm font-bold text-slate-950 transition hover:scale-[1.02]"
+                href="/dashboard"
+                className="rounded-full bg-linear-to-r from-cyan-400 to-blue-500 px-6 py-3 text-sm font-bold text-slate-950 transition hover:scale-[1.02]"
               >
-                Start Reviewing
+                Open Dashboard
               </Link>
-              <button className="rounded-xl border border-white/20 bg-white/5 px-6 py-3 text-sm font-semibold text-slate-100 transition hover:border-cyan-300/60 hover:bg-cyan-300/10">
-                View Demo Workflow
-              </button>
+              <Link
+                href="/demo"
+                className="rounded-full border border-white/30 bg-white/5 px-6 py-3 text-sm font-semibold text-white transition hover:border-cyan-300/70 hover:bg-cyan-300/10"
+              >
+                Open Demo Frontend
+              </Link>
             </div>
           </div>
         </section>
