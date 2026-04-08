@@ -55,6 +55,18 @@ HEALER_SYSTEM_PROMPT = dedent(
     - proposed_patch is for humans in the PR body only; it does not need to apply cleanly.
     - If you cannot copy an exact snippet from the diff for a file, set file_edits to []
       and lower confidence_score (do not hallucinate search text).
+
+    MULTI-FILE / SYNTAX REGRESSIONS:
+    - PRs may break several UI files at once (e.g. unclosed JSX tags in Header.tsx AND
+      malformed markup in Dashboard.tsx). You MUST fix every changed frontend file that
+      still has syntax or JSX structure errors—not only the first failure.
+    - target_files must list every file you modify. Prefer multiple file_edits (one or
+      more per file) until all broken files in scope are repaired.
+
+    WHEN "CURRENT FILES ON PR BRANCH" IS PRESENT IN THE USER MESSAGE:
+    - Those blocks are verbatim text from GitHub for each path. For file_edits on that
+      path, the "search" string MUST be copied exactly from that block (contiguous
+      substring). Do not use the diff alone for search text when snapshots exist.
     """
 ).strip()
 
@@ -312,16 +324,54 @@ def healer_node(state: SentinelState) -> dict[str, object]:
     git_diff = state.get('git_diff', '')
 
     ui_extensions = {'.tsx', '.jsx', '.ts', '.js', '.css', '.scss', '.html'}
-    ui_dirs = ('src/app/', 'src/components/', 'src/pages/', 'src/lib/', 'app/', 'components/', 'pages/')
+    ui_dirs = (
+        'src/app/', 'src/components/', 'src/pages/', 'src/lib/',
+        'app/', 'components/', 'pages/',
+    )
     frontend_files = [
         f for f in all_changed
         if any(f.endswith(ext) for ext in ui_extensions)
-        and any(f.startswith(d) for d in ui_dirs)
+        and (
+            any(f.startswith(d) for d in ui_dirs)
+            or f.startswith('src/')
+        )
     ]
 
     filtered_diff = _filter_diff_to_files(git_diff, frontend_files) if frontend_files else git_diff
     if not filtered_diff.strip():
         filtered_diff = git_diff
+
+    snapshot_section = ""
+    raw_snaps = state.get("pr_head_file_contents")
+    if isinstance(raw_snaps, list) and raw_snaps:
+        blocks: list[str] = []
+        for item in raw_snaps[:25]:
+            if not isinstance(item, dict):
+                continue
+            p = str(item.get("path", "")).strip()
+            c = str(item.get("content", ""))
+            if not p or not c:
+                continue
+            ext = p.rsplit(".", 1)[-1].lower() if "." in p else ""
+            lang = {"tsx": "tsx", "jsx": "jsx", "ts": "ts", "js": "js"}.get(ext, "")
+            fence = f"```{lang}" if lang else "```"
+            blocks.append(f"### FILE: {p}\n{fence}\n{c}\n```")
+        if blocks:
+            snapshot_section = (
+                "\n\nCURRENT FILES ON PR BRANCH (verbatim from GitHub; use for file_edits "
+                "search text, fix ALL broken files below):\n\n"
+                + "\n\n".join(blocks)
+            )
+
+    search_instruction = (
+        'For file_edits: every "search" string must appear EXACTLY in the CURRENT FILES '
+        "section above (copy-paste only from those blocks)."
+        if snapshot_section
+        else (
+            'For file_edits: every "search" string must appear EXACTLY in the current file '
+            "content implied by the diff — copy-paste from the diff only, never invent text."
+        )
+    )
 
     user_prompt = dedent(
         f"""
@@ -333,6 +383,7 @@ def healer_node(state: SentinelState) -> dict[str, object]:
 
         Recent Git Diff (filtered to UI-relevant files):
         {filtered_diff[:15000] if len(filtered_diff) > 15000 else filtered_diff}
+        {snapshot_section}
 
         Failed execution summary:
         {_failure_context(failures)}
@@ -342,8 +393,7 @@ def healer_node(state: SentinelState) -> dict[str, object]:
         fail, the fix must target the frontend file that renders that page content.
         Only patch files from the "Frontend files" list above.
 
-        For file_edits: every "search" string must appear EXACTLY in the current file
-        content implied by the diff — copy-paste from the diff only, never invent text.
+        {search_instruction}
 
         Return strict JSON only.
         """

@@ -168,6 +168,8 @@ export class AIEngineClient {
     testResults: TestResult[];
     gitDiff?: string;
     branch?: string;
+    /** Verbatim PR-head file text from GitHub — enables exact search/replace application. */
+    prHeadFileContents?: Array<{ path: string; content: string }>;
   }): Promise<HealerOnlyResult> {
     if (!this.baseUrl) {
       throw new Error(
@@ -183,6 +185,7 @@ export class AIEngineClient {
       test_results: opts.testResults,
       git_diff: opts.gitDiff ?? "",
       branch: opts.branch ?? "main",
+      pr_head_file_contents: opts.prHeadFileContents ?? [],
     }, 120_000);
   }
 

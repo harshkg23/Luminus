@@ -96,6 +96,13 @@ class RunPipelineResponse(BaseModel):
     dispatch_result_number: int | None = None
 
 
+class PrHeadFileContent(BaseModel):
+    """Full file text on the PR head ref — used by the Healer for verbatim search strings."""
+
+    path: str
+    content: str
+
+
 class RunHealerRequest(BaseModel):
     repo_url: str
     changed_files: list[str] = []
@@ -105,6 +112,7 @@ class RunHealerRequest(BaseModel):
     test_results: list[dict[str, Any]]
     session_id: str | None = None
     force_mock: bool = False
+    pr_head_file_contents: list[PrHeadFileContent] = []
 
 
 class FileEdit(BaseModel):
@@ -276,6 +284,11 @@ async def run_healer(request: RunHealerRequest):
             "branch": request.branch or "main",
             "test_results": request.test_results,
             "force_mock": request.force_mock,
+            "pr_head_file_contents": [
+                {"path": item.path.strip(), "content": item.content}
+                for item in request.pr_head_file_contents
+                if item.path.strip()
+            ],
         }
 
         result = _healer_only_graph.invoke(initial_state)

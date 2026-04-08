@@ -39,6 +39,9 @@ class SentinelState(TypedDict, total=False):
     rag_architect_matches: int
     rag_architect_insights: str
 
+    # PR head snapshots (optional): full file text from GitHub so healer search/replace matches apply step
+    pr_head_file_contents: list[dict[str, Any]]
+
     # Local test controls
     simulate_all_pass: bool
     force_mock: bool

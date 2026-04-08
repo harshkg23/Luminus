@@ -221,6 +221,14 @@ export class AgentOrchestrator {
             });
 
             try {
+                const prHeadSnapshots =
+                    await this.fetchPrHeadFileSnapshotsForHealer(effectiveFiles);
+                if (prHeadSnapshots.length > 0) {
+                    console.log(
+                        `   📎 Healer: attached ${prHeadSnapshots.length} PR-head file snapshot(s) for exact edits`
+                    );
+                }
+
                 healerOutput = await aiEngine.runHealerOnly({
                     repoUrl: `${this.config.owner}/${this.config.repo}`,
                     changedFiles: effectiveFiles,
@@ -229,6 +237,7 @@ export class AgentOrchestrator {
                     testResults: results.results as import("./types").TestResult[],
                     gitDiff: effectiveDiff,
                     branch: this.config.branch,
+                    prHeadFileContents: prHeadSnapshots,
                 });
                 if (healerOutput) {
                     console.log(`   ✅ Healer: rca_type=${healerOutput.rca_type}, confidence=${healerOutput.confidence_score}`);
@@ -945,6 +954,88 @@ export class AgentOrchestrator {
         } catch {
             return { diff: "", changedFiles: [] };
         }
+    }
+
+    /**
+     * Load full file contents from the PR head (or configured branch) so the Healer
+     * can emit search/replace strings that match GitHub exactly.
+     */
+    private async fetchPrHeadFileSnapshotsForHealer(
+        relativePaths: string[]
+    ): Promise<Array<{ path: string; content: string }>> {
+        const token =
+            this.config.githubToken ??
+            process.env.GITHUB_PERSONAL_ACCESS_TOKEN ??
+            process.env.GITHUB_PAT;
+        if (!token?.trim()) return [];
+
+        const headRef =
+            this.config.selectedPr?.headRef ?? this.config.branch ?? "main";
+        const { owner, repo } = this.config;
+
+        const uiExt = [".tsx", ".jsx", ".ts", ".js", ".css", ".scss", ".html"];
+        const uiDirs = [
+            "src/app/",
+            "src/components/",
+            "src/pages/",
+            "src/lib/",
+            "app/",
+            "components/",
+            "pages/",
+        ];
+
+        const candidates = relativePaths.filter((f) => {
+            const lower = f.toLowerCase();
+            if (!uiExt.some((ext) => lower.endsWith(ext))) return false;
+            return (
+                uiDirs.some((d) => f.startsWith(d) || f.includes(`/${d}`)) ||
+                f.startsWith("src/")
+            );
+        });
+
+        const MAX_FILES = 15;
+        const MAX_CHARS = 40_000;
+        const out: Array<{ path: string; content: string }> = [];
+
+        for (const path of candidates.slice(0, MAX_FILES)) {
+            try {
+                const encoded = path
+                    .split("/")
+                    .filter(Boolean)
+                    .map(encodeURIComponent)
+                    .join("/");
+                const url = `https://api.github.com/repos/${owner}/${repo}/contents/${encoded}?ref=${encodeURIComponent(headRef)}`;
+                const res = await fetch(url, {
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                        Accept: "application/vnd.github+json",
+                        "X-GitHub-Api-Version": "2022-11-28",
+                    },
+                });
+                if (!res.ok) continue;
+                const data = (await res.json()) as {
+                    content?: string;
+                    encoding?: string;
+                    type?: string;
+                };
+                if (data.type !== "file" || data.encoding !== "base64" || !data.content) {
+                    continue;
+                }
+                const b64 = data.content.replace(/\n/g, "");
+                let content = Buffer.from(b64, "base64").toString("utf-8");
+                const totalLen = content.length;
+                if (content.length > MAX_CHARS) {
+                    content =
+                        content.slice(0, MAX_CHARS) +
+                        `\n\n/* ... truncated (file was ${totalLen} chars) */\n`;
+                }
+                out.push({ path, content });
+            } catch {
+                // skip file
+            }
+        }
+
+        return out;
     }
 
     /** Fallback: local git diff when target repo API is unavailable */
