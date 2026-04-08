@@ -68,7 +68,7 @@ export default function PipelineDashboard() {
               <h1 className="font-headline text-xl md:text-2xl font-bold text-fg-1 tracking-tight leading-none">
                 Multi-Agent Pipeline
               </h1>
-              <p className="font-mono text-[10px] text-fg-4 mt-1">
+              <p className="font-mono text-[10px] font-medium text-fg-3 mt-1">
                 Live agent flow — updates in real time
               </p>
             </div>
@@ -123,10 +123,10 @@ export default function PipelineDashboard() {
               <span className="material-symbols-outlined text-accent" style={{ fontSize: "15px" }}>
                 account_tree
               </span>
-              <span className="font-mono text-[10px] uppercase tracking-widest font-bold" style={{ color: "rgba(255,255,255,0.5)" }}>
+              <span className="font-mono text-[10px] uppercase tracking-widest font-bold" style={{ color: "rgba(255,255,255,0.8)" }}>
                 Live Agent Flow
               </span>
-              <span className="ml-auto font-mono text-[9px]" style={{ color: "rgba(255,255,255,0.2)" }}>
+              <span className="ml-auto font-mono text-[9px] font-medium" style={{ color: "rgba(255,255,255,0.5)" }}>
                 Multi-agent orchestration
               </span>
             </div>

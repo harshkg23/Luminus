@@ -55,13 +55,13 @@ export default function LivePipelineTerminal({
           <span className="w-2.5 h-2.5 rounded-full bg-[#febc2e]" />
           <span className="w-2.5 h-2.5 rounded-full bg-[#28c840]" />
           <span
-            className="font-mono text-[10px] uppercase tracking-widest ml-2"
-            style={{ color: "rgba(255,255,255,0.35)" }}
+            className="font-mono text-[10px] uppercase tracking-widest ml-2 font-bold"
+            style={{ color: "rgba(255,255,255,0.8)" }}
           >
             Agent Logs
           </span>
         </div>
-        <span className="flex items-center gap-1.5 font-mono text-[9px]" style={{ color: "rgba(255,255,255,0.3)" }}>
+        <span className="flex items-center gap-1.5 font-mono text-[9px] font-medium" style={{ color: "rgba(255,255,255,0.6)" }}>
           <span className="pulse-indicator" />
           SSE
         </span>
@@ -80,10 +80,10 @@ export default function LivePipelineTerminal({
             >
               terminal
             </span>
-            <p style={{ color: "rgba(255,255,255,0.2)" }} className="text-[11px]">
+            <p style={{ color: "rgba(255,255,255,0.6)" }} className="text-[11px] font-medium">
               Waiting for agent activity…
             </p>
-            <p style={{ color: "rgba(255,255,255,0.12)" }} className="text-[10px]">
+            <p style={{ color: "rgba(255,255,255,0.4)" }} className="text-[10px] font-medium">
               Run the pipeline to see live logs
             </p>
           </div>
@@ -94,8 +94,8 @@ export default function LivePipelineTerminal({
               <div key={`${line.ts}-${i}`} className="flex gap-2 break-words items-start hover:bg-white/[0.02] rounded px-1 -mx-1 transition-colors">
                 {/* Timestamp */}
                 <span
-                  className="shrink-0 select-none tabular-nums text-[10px] mt-0.5"
-                  style={{ color: "rgba(255,255,255,0.2)" }}
+                  className="shrink-0 select-none tabular-nums text-[10px] mt-0.5 font-medium"
+                  style={{ color: "rgba(255,255,255,0.4)" }}
                 >
                   {formatTime(line.ts)}
                 </span>
@@ -118,16 +118,16 @@ export default function LivePipelineTerminal({
                 <span
                   className={
                     line.level === "error"
-                      ? "text-[#f87171]"
+                      ? "text-[#f87171] font-medium"
                       : line.level === "success"
-                        ? "text-[#4ade80]"
+                        ? "text-[#4ade80] font-medium"
                         : line.level === "warn"
-                          ? "text-[#fbbf24]"
-                          : undefined
+                          ? "text-[#fbbf24] font-medium"
+                          : "font-medium"
                   }
                   style={
                     !line.level || line.level === "info"
-                      ? { color: "rgba(255,255,255,0.65)" }
+                      ? { color: "rgba(255,255,255,0.85)" }
                       : undefined
                   }
                 >
