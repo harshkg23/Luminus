@@ -48,9 +48,18 @@ export const authOptions: NextAuthOptions = {
     signIn:  "/auth/signin",
     signOut: "/auth/signin",
     error:   "/auth/signin",
+    newUser: "/dashboard",
   },
 
   callbacks: {
+    async redirect({ url, baseUrl }) {
+      // Always send to /dashboard after sign-in unless a more specific callbackUrl is set
+      if (url === baseUrl || url === `${baseUrl}/`) return `${baseUrl}/dashboard`;
+      if (url.startsWith("/")) return `${baseUrl}${url}`;
+      if (url.startsWith(baseUrl)) return url;
+      return `${baseUrl}/dashboard`;
+    },
+
     async signIn({ user, account }) {
       // persist OAuth users to MongoDB on first sign-in
       if (account?.provider !== "credentials") {

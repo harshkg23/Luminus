@@ -5,12 +5,11 @@ import { usePathname } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 
 const navItems = [
-  { href: "/",         icon: "dashboard",     label: "Dashboard" },
-  { href: "/pipeline", icon: "account_tree",  label: "Pipeline"  },
-  { href: "/repos",    icon: "database",      label: "Repos"     },
-  { href: "/dashboard", icon: "account_tree", label: "Pipeline"   },
-  { href: "/metrics",  icon: "analytics",     label: "Metrics"   },
-  { href: "/settings", icon: "settings",      label: "Settings"  },
+  { href: "/dashboard", icon: "dashboard",    label: "Dashboard" },
+  { href: "/pipeline",  icon: "account_tree", label: "Pipeline"  },
+  { href: "/repos",     icon: "database",     label: "Repos"     },
+  { href: "/metrics",   icon: "analytics",    label: "Metrics"   },
+  { href: "/settings",  icon: "settings",     label: "Settings"  },
 ];
 
 export default function Sidebar() {
