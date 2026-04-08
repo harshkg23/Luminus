@@ -27,6 +27,18 @@ import {
  * 5. Assert page contains "Welcome"
  * ```
  */
+/** Strip wrapping ASCII quotes and trim (e.g. `"/"` → `/`). */
+function normalizeNavigateTarget(raw: string): string {
+    let s = raw.trim();
+    if (
+        (s.startsWith('"') && s.endsWith('"')) ||
+        (s.startsWith("'") && s.endsWith("'"))
+    ) {
+        s = s.slice(1, -1).trim();
+    }
+    return s;
+}
+
 export function parseTestPlan(markdown: string): TestStep[] {
     const steps: TestStep[] = [];
     const lines = markdown.split("\n");
@@ -102,13 +114,17 @@ function parseStepDescription(
         };
     }
 
-    const navMatch = normalized.match(/navigate\s+to\s+(\S+)/i);
+    const navMatch = normalized.match(/navigate\s+to\s+(.+)$/i);
     if (navMatch) {
+        const value = normalizeNavigateTarget(navMatch[1] ?? "");
+        if (!value) {
+            return null;
+        }
         return {
             index,
             description: normalized,
             action: "navigate",
-            value: navMatch[1],
+            value,
         };
     }
 

@@ -84,5 +84,7 @@ def courier_decision_node(state: SentinelState) -> dict[str, object]:
             "target_files": target_files_list,
             "proposed_patch": proposed_patch,
             "head_branch": fix_branch,
+            "repo_url": repo_url,
+            "base_branch": "main",
         },
     }

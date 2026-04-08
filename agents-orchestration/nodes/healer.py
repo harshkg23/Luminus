@@ -36,23 +36,25 @@ HEALER_SYSTEM_PROMPT = dedent(
     - If the test asserts "page contains X" and X is missing, fix the source
       file that renders that page.
 
-    FILE EDITS — THIS IS HOW YOUR FIX GETS APPLIED:
-    - file_edits is the PRIMARY way your fix is applied. It must be an array of
-      objects, each with exactly three keys:
-        { "file": "path/to/file.tsx", "search": "exact text to find", "replace": "corrected text" }
-    - "search" must be an EXACT substring copied from the git diff's '+' lines
-      (the CURRENT broken code). Copy it character-for-character from the diff.
-    - "replace" should be the corrected code (often the original '-' lines from
-      the diff, i.e. reverting the regression).
-    - Keep each edit MINIMAL — only the specific lines that need to change.
-    - Include enough surrounding context in "search" (2-3 lines) to make it unique
-      in the file, but not so much that it becomes fragile.
-    - You can have multiple edits for the same file or different files.
-
-    - proposed_patch is kept for display in the PR body. It can be a simplified
-      unified diff or a summary — it does NOT need to be machine-applicable.
-    - If no changed file directly corresponds to the failure, set file_edits to []
-      and confidence_score below 0.5.
+    FILE EDITS — THIS IS HOW YOUR FIX GETS APPLIED (AUTOMATION USES LITERAL MATCH):
+    - file_edits: array of objects, each with exactly:
+        { "file": "<path>", "search": "<snippet>", "replace": "<snippet>" }
+    - "file" MUST be one of the paths listed under "Frontend files" / changed files
+      in the user message (repo-relative, use forward slashes e.g. src/app/page.tsx).
+      NEVER invent paths like src/pages/X if the repo uses src/app/ (Next.js App Router).
+    - "search" MUST be copied verbatim from the Git diff shown above:
+      copy the exact lines as they appear in the patch for that file (the current
+      post-change code — usually what appears after '+' or in the post-image of the hunk).
+      Do NOT paraphrase, summarize, abbreviate, or use "..." placeholders.
+      Do NOT copy from memory, RAG samples, or guesses — only from this diff.
+    - Prefer a SHORT anchor (1–5 lines) that is still unique in that file: a single
+      JSX tag with stable attributes, or a small block including data-testid / className.
+    - "replace" is the corrected text (often the pre-regression lines from '-' in the
+      same hunk). Same rules: verbatim, no truncation.
+    - Multiple edits: order from top to bottom of file when possible.
+    - proposed_patch is for humans in the PR body only; it does not need to apply cleanly.
+    - If you cannot copy an exact snippet from the diff for a file, set file_edits to []
+      and lower confidence_score (do not hallucinate search text).
     """
 ).strip()
 
@@ -153,7 +155,11 @@ def _mock_healer(state: SentinelState, failures: list[dict[str, Any]]) -> dict[s
     }
 
 
-def _parse_response(content: str) -> dict[str, object]:
+def _normalize_rel_path(path: str) -> str:
+    return path.strip().replace("\\", "/").lstrip("./")
+
+
+def _parse_response(content: str, allowed_files: list[str] | None = None) -> dict[str, object]:
     payload = _load_json_payload(content)
     rca_type = str(payload["rca_type"]).strip()
     rca_report = str(payload["rca_report"]).strip()
@@ -168,12 +174,25 @@ def _parse_response(content: str) -> dict[str, object]:
 
     raw_file_edits = payload.get("file_edits", [])
     file_edits: list[dict[str, str]] = []
+    raw_allowed = [
+        _normalize_rel_path(str(f)) for f in (allowed_files or []) if str(f).strip()
+    ]
+    allowed_norm = set(raw_allowed) if raw_allowed else None
     if isinstance(raw_file_edits, list):
         for edit in raw_file_edits:
             if isinstance(edit, dict) and edit.get("file") and edit.get("search") and "replace" in edit:
+                fn = _normalize_rel_path(str(edit["file"]))
+                if allowed_norm is not None and fn not in allowed_norm:
+                    continue
+                search = str(edit["search"])
+                # Drop obvious placeholder truncation (typed "..." summary, not JS spread)
+                if "\u2026" in search or re.search(
+                    r"[A-Za-z0-9_=/-]\.{3}(\s|$|\"|'|`|>|<)", search
+                ):
+                    continue
                 file_edits.append({
-                    "file": str(edit["file"]).strip(),
-                    "search": str(edit["search"]),
+                    "file": fn,
+                    "search": search,
                     "replace": str(edit["replace"]),
                 })
 
@@ -276,11 +295,14 @@ def healer_node(state: SentinelState) -> dict[str, object]:
             )
             if edits:
                 memory_context += f"File Edits ({len(edits)} edits):\n"
-                for e in edits[:5]:
+                for e in edits[:3]:
+                    fp = e.get("file") or e.get("file_path") or "?"
+                    sv = (e.get("search", "") or "").strip()
+                    rv = (e.get("replace", "") or "").strip()
                     memory_context += (
-                        f"  File: {e.get('file_path', '?')}\n"
-                        f"  Search: {(e.get('search', '') or '')[:120]}...\n"
-                        f"  Replace: {(e.get('replace', '') or '')[:120]}...\n"
+                        f"  File: {fp}\n"
+                        f"  Search (verbatim): {sv[:600]}{'…[truncated]' if len(sv) > 600 else ''}\n"
+                        f"  Replace (verbatim): {rv[:600]}{'…[truncated]' if len(rv) > 600 else ''}\n"
                     )
             memory_context += "\n"
     else:
@@ -320,6 +342,9 @@ def healer_node(state: SentinelState) -> dict[str, object]:
         fail, the fix must target the frontend file that renders that page content.
         Only patch files from the "Frontend files" list above.
 
+        For file_edits: every "search" string must appear EXACTLY in the current file
+        content implied by the diff — copy-paste from the diff only, never invent text.
+
         Return strict JSON only.
         """
     ).strip()
@@ -337,7 +362,7 @@ def healer_node(state: SentinelState) -> dict[str, object]:
             ]
         )
         content = response.content if isinstance(response.content, str) else str(response.content)
-        result = _parse_response(content)
+        result = _parse_response(content, allowed_files=list(all_changed))
         result.update(rag_meta)
         return result
     except Exception as err:

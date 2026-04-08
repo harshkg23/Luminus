@@ -243,6 +243,8 @@ export async function applyFileEdits(options: {
     for (const edit of fileEdits) {
       const searchStr = edit.search;
       const replaceStr = edit.replace;
+      const replaceNorm = replaceStr.replace(/\r\n/g, "\n");
+      let applied = false;
 
       // Try exact match first
       if (content.includes(searchStr)) {
@@ -253,34 +255,47 @@ export async function applyFileEdits(options: {
       }
 
       // Try with normalized line endings
-      const normalizedContent = content.replace(/\r\n/g, "\n");
+      let normalizedContent = content.replace(/\r\n/g, "\n");
       const normalizedSearch = searchStr.replace(/\r\n/g, "\n");
       if (normalizedContent.includes(normalizedSearch)) {
-        content = normalizedContent.replace(normalizedSearch, replaceStr.replace(/\r\n/g, "\n"));
+        content = normalizedContent.replace(normalizedSearch, replaceNorm);
         console.log(`[FileEdits] ✅ Applied edit to ${filePath} (normalized line endings)`);
         fileChanged = true;
         continue;
       }
 
       // Try with trimmed trailing whitespace per line
-      const trimmedContent = normalizedContent.split("\n").map(l => l.trimEnd()).join("\n");
-      const trimmedSearch = normalizedSearch.split("\n").map(l => l.trimEnd()).join("\n");
+      const trimmedContent = normalizedContent.split("\n").map((l) => l.trimEnd()).join("\n");
+      const trimmedSearch = normalizedSearch.split("\n").map((l) => l.trimEnd()).join("\n");
       if (trimmedContent.includes(trimmedSearch)) {
         const lines = normalizedContent.split("\n");
         const searchLines = trimmedSearch.split("\n");
-        const replaceLines = replaceStr.replace(/\r\n/g, "\n").split("\n");
+        const replaceLines = replaceNorm.split("\n");
 
-        // Find the starting line
         for (let i = 0; i <= lines.length - searchLines.length; i++) {
           const match = searchLines.every((sl, j) => lines[i + j].trimEnd() === sl);
           if (match) {
             lines.splice(i, searchLines.length, ...replaceLines);
             content = lines.join("\n");
+            normalizedContent = content.replace(/\r\n/g, "\n");
             console.log(`[FileEdits] ✅ Applied edit to ${filePath} (trimmed whitespace match)`);
             fileChanged = true;
+            applied = true;
             break;
           }
         }
+        if (applied) continue;
+      }
+
+      // Fuzzy: same heuristics as unified diff (trim + collapse whitespace)
+      const fuzzy = fuzzyIndexOf(normalizedContent, normalizedSearch);
+      if (fuzzy) {
+        content =
+          normalizedContent.slice(0, fuzzy.idx) +
+          replaceNorm +
+          normalizedContent.slice(fuzzy.idx + fuzzy.matchLen);
+        console.log(`[FileEdits] ✅ Applied edit to ${filePath} (fuzzy whitespace match)`);
+        fileChanged = true;
         continue;
       }
 
