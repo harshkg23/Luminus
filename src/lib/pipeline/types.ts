@@ -12,30 +12,17 @@ export type StepId =
   | "ship"
   | "block";
 
-export type PipelineSnapshot = {
-  steps: Record<StepId, StepStatus>;
-  afterTests: "courier" | "watchdog" | null;
-  afterConfidence: "ship" | "block" | null;
-  logs: Array<{
-    ts: string;
-    level: "info" | "success" | "error" | "warn";
-    message: string;
-    step?: string;
-  }>;
-  updatedAt: number;
-};
+export interface LogEntry {
+  ts: string;
+  step?: string;
+  level?: "info" | "warn" | "error" | "success";
+  message: string;
+}
 
-/** Optional rich context for Slack — pass as `slack` on the pipeline webhook body. */
-export type PipelineSlackMeta = {
-  repo?: string;
-  branch?: string;
-  targetUrl?: string;
-  prNumber?: number;
-  sessionId?: string;
-  durationMs?: number;
-  passed?: number;
-  failed?: number;
-  failedSteps?: Array<{ step: string; error: string }>;
-  /** e.g. "Manual pipeline run triggered" */
-  runKind?: string;
-};
+export interface PipelineSnapshot {
+  steps: Record<StepId, StepStatus>;
+  afterTests: string | null;
+  afterConfidence: string | null;
+  logs: LogEntry[];
+  updatedAt: number;
+}
