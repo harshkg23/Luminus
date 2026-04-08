@@ -1,6 +1,8 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { useState, useRef, useEffect } from "react";
+import { useSession, signOut } from "next-auth/react";
 import { useTheme } from "./ThemeProvider";
 
 interface TopBarProps {
@@ -10,6 +12,28 @@ interface TopBarProps {
 
 export default function TopBar({ center, activeLabel }: TopBarProps) {
   const { theme, toggle } = useTheme();
+  const { data: session } = useSession();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  const userName = session?.user?.name ?? session?.user?.email ?? "User";
+  const initials = userName
+    .split(" ")
+    .map((w) => w[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 2);
 
   return (
     <header
@@ -60,12 +84,31 @@ export default function TopBar({ center, activeLabel }: TopBarProps) {
           <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-accent rounded-full" />
         </button>
 
-        <button className="p-2 rounded-lg text-fg-3 hover:text-accent hover:bg-[var(--accent-soft)] transition-all">
-          <span className="material-symbols-outlined" style={{ fontSize: "19px" }}>settings</span>
-        </button>
+        {/* Avatar + dropdown */}
+        <div className="relative ml-1" ref={menuRef}>
+          <button
+            onClick={() => setMenuOpen((o) => !o)}
+            title={userName}
+            className="w-7 h-7 rounded-full bg-[var(--accent-soft)] border border-[var(--bd-2)] flex items-center justify-center font-mono text-[9px] font-bold text-accent hover:border-accent hover:bg-accent/20 transition-all"
+          >
+            {initials}
+          </button>
 
-        <div className="ml-1 w-7 h-7 rounded-full bg-[var(--accent-soft)] border border-[var(--bd-2)] flex items-center justify-center font-mono text-[9px] font-bold text-accent">
-          AB
+          {menuOpen && (
+            <div className="absolute right-0 top-9 z-50 w-52 rounded-xl border border-[var(--bd-2)] bg-[var(--bg-surface)] shadow-xl overflow-hidden">
+              <div className="px-4 py-3 border-b border-[var(--bd)]">
+                <p className="font-mono text-[11px] font-bold text-fg-1 truncate">{session?.user?.name ?? "User"}</p>
+                <p className="font-mono text-[10px] text-fg-4 truncate mt-0.5">{session?.user?.email ?? ""}</p>
+              </div>
+              <button
+                onClick={() => signOut({ callbackUrl: "/auth" })}
+                className="w-full flex items-center gap-2 px-4 py-2.5 font-mono text-[11px] text-neg hover:bg-neg/10 transition-colors"
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: "15px" }}>logout</span>
+                Sign out
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </header>
