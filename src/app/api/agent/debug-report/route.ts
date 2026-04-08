@@ -1,12 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createNotionReport, type NotionAgent, type NotionEvent } from "@/lib/integrations/notion";
 
-const validAgents: NotionAgent[] = ["pipeline", "reviewer", "courier"];
+const validAgents: NotionAgent[] = [
+  "pipeline", "architect", "scripter", "watchdog", "healer", "courier", "reviewer",
+];
 const validEvents: NotionEvent[] = [
   "Pipeline Start",
-  "Review Completed",
-  "Slack Notified",
+  "Pipeline Complete",
   "Pipeline Failed",
+  "Review Completed",
+  "PR Created",
+  "Issue Created",
+  "Test Failure",
 ];
 
 export async function POST(request: NextRequest) {

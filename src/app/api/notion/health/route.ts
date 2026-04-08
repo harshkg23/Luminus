@@ -14,9 +14,9 @@ export async function GET() {
 
 export async function POST() {
   const result = await createNotionReport({
-    title: `Luminus Notion Health Check ${new Date().toISOString()}`,
-    repo: "luminus/local",
-    agent: "pipeline",
+    title: `[TollGate] Health Check — ${new Date().toISOString()}`,
+    repo: process.env.PIPELINE_SLACK_DEFAULT_REPO || "luminus/local",
+    agent: "architect",
     event: "Pipeline Start",
     status: "In Progress",
     context: JSON.stringify({ source: "POST /api/notion/health" }, null, 2),
