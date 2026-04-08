@@ -79,11 +79,6 @@ export default function TopBar({ center, activeLabel }: TopBarProps) {
           </span>
         </button>
 
-        <button className="p-2 rounded-lg text-fg-3 hover:text-accent hover:bg-[var(--accent-soft)] transition-all relative">
-          <span className="material-symbols-outlined" style={{ fontSize: "19px" }}>notifications</span>
-          <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-accent rounded-full" />
-        </button>
-
         {/* Avatar + dropdown */}
         <div className="relative ml-1" ref={menuRef}>
           <button
