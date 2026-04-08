@@ -1,6 +1,7 @@
 import "server-only";
 
-function esc(value: string): string {
+/** Escape for Slack mrkdwn / plain_text that allows HTML entities in API payloads. */
+export function escSlackMrkdwn(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
@@ -27,7 +28,7 @@ export async function sendSlackReviewSummary(input: {
         type: "section",
         text: {
           type: "mrkdwn",
-          text: `*Repository:* ${esc(input.owner)}/${esc(input.repo)}\n*PR:* #${input.prNumber}`,
+          text: `*Repository:* ${escSlackMrkdwn(input.owner)}/${escSlackMrkdwn(input.repo)}\n*PR:* #${input.prNumber}`,
         },
       },
       {

@@ -6,7 +6,7 @@ import { useSession, signOut } from "next-auth/react";
 
 const navItems = [
   { href: "/",         icon: "dashboard",     label: "Dashboard" },
-  { href: "/prs",      icon: "checklist_rtl", label: "PRs"       },
+  { href: "/pipeline", icon: "account_tree",  label: "Pipeline"  },
   { href: "/repos",    icon: "database",      label: "Repos"     },
   { href: "/metrics",  icon: "analytics",     label: "Metrics"   },
   { href: "/settings", icon: "settings",      label: "Settings"  },
