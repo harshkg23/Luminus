@@ -53,15 +53,15 @@ const emptySnapshot = (): PipelineSnapshot => ({
 });
 
 export default function ReposPage() {
-  const [owner, setOwner] = useState("");
-  const [repoName, setRepoName] = useState("");
+  const [owner, setOwner] = useState("harshkg23");
+  const [repoName, setRepoName] = useState("sample-dashboard-app");
   const [targetUrl, setTargetUrl] = useState(
     () =>
       process.env.NEXT_PUBLIC_TOLLGATE_TARGET_URL ??
       process.env.NEXT_PUBLIC_SENTINELQA_TARGET_URL ??
-      "",
+      "http://localhost:3000",
   );
-  const [slackChannel, setSlackChannel] = useState("");
+  const [slackChannel, setSlackChannel] = useState("#new-channel");
 
   // SSE Pipeline state
   const [snapshot, setSnapshot] = useState<PipelineSnapshot>(emptySnapshot);
@@ -108,7 +108,7 @@ export default function ReposPage() {
   }, []);
 
   const [mode, setMode] = useState<"npx" | "docker">("npx");
-  const [tone, setTone] = useState("");
+  const [tone, setTone] = useState("Direct and concise");
 
   const [loadingPrs, setLoadingPrs] = useState(false);
   const [runningPipeline, setRunningPipeline] = useState(false);
