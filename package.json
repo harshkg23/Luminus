@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@notionhq/client": "^5.1.0",
     "@auth/mongodb-adapter": "^3.11.1",
     "bcryptjs": "^3.0.3",
     "mongodb": "^6.21.0",

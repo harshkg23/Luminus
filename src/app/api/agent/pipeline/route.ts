@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateMockReview } from "@/lib/review/mock-reviewer";
 import { sendSlackReviewSummary } from "@/lib/integrations/slack";
+import { createNotionReport } from "@/lib/integrations/notion";
 
 export const dynamic = "force-dynamic";
 
@@ -34,9 +35,30 @@ export async function POST(request: NextRequest) {
     }
 
     const review = generateMockReview(prTitle);
+    const fullRepo = `${owner}/${repo}`;
+
+    void createNotionReport({
+      title: `[${fullRepo}] Pipeline Start - PR #${prNumber}`,
+      repo: fullRepo,
+      agent: "pipeline",
+      event: "Pipeline Start",
+      status: "In Progress",
+      prLink: body.selectedPr?.url,
+      context: JSON.stringify(
+        {
+          prNumber,
+          prTitle,
+          tone: body.tone?.trim() || review.features.tone,
+          startedAt: new Date().toISOString(),
+        },
+        null,
+        2,
+      ),
+    });
+
     const response = {
       status: "completed",
-      repo: `${owner}/${repo}`,
+      repo: fullRepo,
       pr: {
         number: prNumber,
         title: prTitle,
@@ -67,9 +89,38 @@ export async function POST(request: NextRequest) {
       channel: body.slackChannel,
     });
 
+    void createNotionReport({
+      title: `[${fullRepo}] Review Completed - PR #${prNumber}`,
+      repo: fullRepo,
+      agent: "reviewer",
+      event: "Review Completed",
+      status: highSeverity > 0 ? "Needs Review" : "Fixed",
+      confidence: (100 - review.riskScore) / 100,
+      prLink: body.selectedPr?.url,
+      context: JSON.stringify(
+        {
+          riskScore: review.riskScore,
+          findings: review.findings.length,
+          highSeverity,
+          summary: review.summary,
+          nextActions: response.nextActions,
+        },
+        null,
+        2,
+      ),
+    });
+
     return NextResponse.json(response);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Pipeline request failed.";
+    void createNotionReport({
+      title: "[unknown] Pipeline Failed",
+      repo: "unknown",
+      agent: "pipeline",
+      event: "Pipeline Failed",
+      status: "Failed",
+      context: JSON.stringify({ message }, null, 2),
+    });
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
