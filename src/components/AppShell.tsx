@@ -6,9 +6,8 @@ import Sidebar from "./Sidebar";
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  if (pathname.startsWith("/auth")) return <>{children}</>;
-  /* TollGate-style dashboard: full viewport, own sidebar (matches Hack-nocturne). */
-  if (pathname.startsWith("/dashboard")) return <ProtectedShellFullWidth>{children}</ProtectedShellFullWidth>;
+  if (pathname === "/" || pathname.startsWith("/auth")) return <>{children}</>;
+  /* All protected routes get sidebar + layout */
   return <ProtectedShell>{children}</ProtectedShell>;
 }
 
