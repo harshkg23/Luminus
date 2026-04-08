@@ -1,164 +1,553 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
 import TopBar from "@/components/TopBar";
 
-const chartBars = [40, 55, 45, 80, 70, 60, 30, 90, 65, 50, 45, 40, 35];
+/* ═══════════════════════════════════════════════════════════════════════════
+   Types
+   ═══════════════════════════════════════════════════════════════════════════ */
 
-const services = [
-  { name: "API Gateway", latency: "12ms",  pct: 15, highlight: false },
-  { name: "Auth Service", latency: "45ms", pct: 40, highlight: false },
-  { name: "AI Inference", latency: "210ms",pct: 85, highlight: true  },
-  { name: "DB Cluster",   latency: "18ms", pct: 22, highlight: false },
+interface MetricSample {
+  labels: Record<string, string>;
+  value: number;
+}
+interface MetricEntry {
+  name: string;
+  samples: MetricSample[];
+}
+type MetricsMap = Record<string, MetricEntry>;
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Config
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+const POLL_MS = 10_000;
+const MAX_SPARK = 30;
+const GRAFANA_URL = "http://localhost:3001";
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Pure helpers
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+function mv(m: MetricsMap, name: string, labels?: Record<string, string>): number {
+  const entry = m[name];
+  if (!entry) return 0;
+  if (!labels) return entry.samples[0]?.value ?? 0;
+  const s = entry.samples.find((sample) =>
+    Object.entries(labels).every(([k, v]) => sample.labels[k] === v),
+  );
+  return s?.value ?? 0;
+}
+
+function msum(m: MetricsMap, name: string): number {
+  const entry = m[name];
+  if (!entry) return 0;
+  return entry.samples.reduce((a, b) => a + b.value, 0);
+}
+
+function fmt(n: number, d = 1): string {
+  if (n >= 1e6) return `${(n / 1e6).toFixed(d)}M`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(d)}k`;
+  return n.toFixed(d);
+}
+
+function fmtDur(sec: number): string {
+  if (sec < 0.001) return "—";
+  if (sec < 1) return `${(sec * 1000).toFixed(0)}ms`;
+  if (sec < 60) return `${sec.toFixed(1)}s`;
+  return `${(sec / 60).toFixed(1)}m`;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Sparkline
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+function Sparkline({ data, color = "var(--accent)", w = 90, h = 30 }: {
+  data: number[]; color?: string; w?: number; h?: number;
+}) {
+  if (data.length < 2) return <div style={{ width: w, height: h }} />;
+  const max = Math.max(...data, 1);
+  const min = Math.min(...data, 0);
+  const range = max - min || 1;
+  const pts = data
+    .map((v, i) => `${(i / (data.length - 1)) * w},${h - ((v - min) / range) * (h - 4) - 2}`)
+    .join(" ");
+  const gid = `sp${color.replace(/\W/g, "")}`;
+  return (
+    <svg width={w} height={h} className="shrink-0">
+      <defs>
+        <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.25" />
+          <stop offset="100%" stopColor={color} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <polyline fill="none" stroke={color} strokeWidth="1.5" points={pts} />
+      <polygon fill={`url(#${gid})`} points={`0,${h} ${pts} ${w},${h}`} />
+    </svg>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   StatCard
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+function StatCard({ label, value, sub, subColor, icon, spark, sparkColor }: {
+  label: string; value: string; sub: string; subColor?: string;
+  icon: string; spark?: number[]; sparkColor?: string;
+}) {
+  return (
+    <div className="glass-panel p-5 rounded-xl flex flex-col justify-between min-h-[120px]">
+      <div className="flex justify-between items-start">
+        <span className="font-mono text-[9px] uppercase tracking-widest" style={{ color: "var(--fg-4)" }}>{label}</span>
+        <span className="material-symbols-outlined" style={{ fontSize: 18, color: "var(--accent)" }}>{icon}</span>
+      </div>
+      <div className="flex items-end justify-between gap-3 mt-2">
+        <div>
+          <span className="text-3xl font-headline font-bold" style={{ color: "var(--fg-1)" }}>{value}</span>
+          <span className="ml-2 font-mono text-[10px]" style={{ color: subColor || "var(--fg-3)" }}>{sub}</span>
+        </div>
+        {spark && spark.length > 1 && <Sparkline data={spark} color={sparkColor} />}
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   BarChart
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+function BarChart({ data, labels, color = "var(--accent)", h = 180 }: {
+  data: number[]; labels?: string[]; color?: string; h?: number;
+}) {
+  const max = Math.max(...data, 1);
+  return (
+    <div className="flex items-end gap-1 w-full" style={{ height: h }}>
+      {data.map((v, i) => (
+        <div key={i} className="flex-1 flex flex-col items-center gap-1 group relative">
+          <div className="w-full rounded-t-sm transition-all hover:opacity-80 cursor-pointer relative"
+            style={{ height: `${Math.max((v / max) * 100, 1)}%`, background: `color-mix(in srgb, ${color} 25%, transparent)` }}>
+            <div className="absolute top-0 w-full h-0.5 rounded-full" style={{ background: color }} />
+            <div className="absolute -top-7 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity rounded px-1.5 py-0.5 text-[9px] font-mono whitespace-nowrap z-10"
+              style={{ background: "var(--bg-elevated)", border: "1px solid var(--bd)", color: "var(--fg-2)" }}>{v.toFixed(1)}</div>
+          </div>
+          {labels?.[i] && <span className="text-[8px] font-mono" style={{ color: "var(--fg-4)" }}>{labels[i]}</span>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   AgentLatency
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+function AgentLatency({ m }: { m: MetricsMap }) {
+  const agents = ["architect", "scripter", "healer", "courier"];
+  return (
+    <div className="glass-panel rounded-xl overflow-hidden">
+      <div className="px-5 py-3 border-b flex items-center gap-2" style={{ borderColor: "var(--bd)" }}>
+        <span className="material-symbols-outlined" style={{ fontSize: 16, color: "var(--accent)" }}>alt_route</span>
+        <span className="text-sm font-headline font-semibold" style={{ color: "var(--fg-1)" }}>Agent Step Latency</span>
+      </div>
+      <div className="p-5 space-y-4">
+        {agents.map((a) => {
+          const count = mv(m, "tollgate_agent_step_duration_seconds_count", { agent: a });
+          const sum = mv(m, "tollgate_agent_step_duration_seconds_sum", { agent: a });
+          const avg = count > 0 ? sum / count : 0;
+          const pct = Math.min((avg / 60) * 100, 100);
+          return (
+            <div key={a} className="space-y-1.5">
+              <div className="flex justify-between font-mono text-[11px]">
+                <span style={{ color: "var(--fg-3)" }} className="capitalize">{a}</span>
+                <span style={{ color: avg > 30 ? "var(--warn)" : "var(--accent)" }} className="font-bold">
+                  {count > 0 ? fmtDur(avg) : "—"}
+                </span>
+              </div>
+              <div className="w-full rounded-full h-1 overflow-hidden" style={{ background: "var(--bg-elevated)" }}>
+                <div className="h-full rounded-full transition-all duration-700"
+                  style={{ width: `${pct}%`, background: avg > 30 ? "var(--warn)" : "var(--accent)" }} />
+              </div>
+            </div>
+          );
+        })}
+        <div className="pt-3 mt-2 border-t flex items-center justify-between font-mono text-[10px] uppercase tracking-widest"
+          style={{ borderColor: "var(--bd)", color: "var(--fg-4)" }}>
+          <span>Source</span>
+          <span className="font-bold" style={{ color: "var(--fg-1)" }}>Prometheus</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ApiRequests
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+function ApiRequests({ m }: { m: MetricsMap }) {
+  const entry = m["tollgate_api_requests_total"];
+  const byEp: Record<string, number> = {};
+  if (entry) {
+    for (const s of entry.samples) {
+      const ep = s.labels.endpoint || "unknown";
+      byEp[ep] = (byEp[ep] || 0) + s.value;
+    }
+  }
+  const sorted = Object.entries(byEp).sort(([, a], [, b]) => b - a).slice(0, 8);
+  const total = sorted.reduce((a, [, v]) => a + v, 0);
+
+  return (
+    <div className="glass-panel p-5 rounded-xl">
+      <div className="flex items-center gap-2 mb-5">
+        <span className="material-symbols-outlined" style={{ fontSize: 16, color: "var(--accent)" }}>api</span>
+        <span className="text-sm font-headline font-semibold" style={{ color: "var(--fg-1)" }}>API Request Distribution</span>
+      </div>
+      {sorted.length === 0 ? (
+        <p className="font-mono text-[10px] italic" style={{ color: "var(--fg-4)" }}>No API requests recorded yet.</p>
+      ) : (
+        <div className="space-y-3">
+          {sorted.map(([ep, count]) => (
+            <div key={ep} className="space-y-1">
+              <div className="flex justify-between font-mono text-[10px]">
+                <span style={{ color: "var(--fg-3)" }} className="truncate max-w-[200px]">{ep}</span>
+                <span style={{ color: "var(--fg-2)" }}>{count.toFixed(0)}</span>
+              </div>
+              <div className="w-full rounded-full h-1 overflow-hidden" style={{ background: "var(--bg-elevated)" }}>
+                <div className="h-full rounded-full" style={{ width: `${total > 0 ? (count / total) * 100 : 0}%`, background: "var(--data)" }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   GrafanaEmbed
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+function GrafanaEmbed() {
+  const [available, setAvailable] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    // Check if Grafana is reachable (any response = available)
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3000);
+    fetch(`${GRAFANA_URL}/api/health`, { signal: controller.signal, mode: "no-cors" })
+      .then(() => setAvailable(true))
+      .catch(() => setAvailable(false))
+      .finally(() => clearTimeout(timer));
+    return () => { controller.abort(); clearTimeout(timer); };
+  }, []);
+
+  return (
+    <div className="glass-panel rounded-xl overflow-hidden">
+      <div className="px-5 py-3 border-b flex items-center justify-between" style={{ borderColor: "var(--bd)" }}>
+        <div className="flex items-center gap-2">
+          <span className="material-symbols-outlined" style={{ fontSize: 16, color: "var(--vi)" }}>monitoring</span>
+          <span className="text-sm font-headline font-semibold" style={{ color: "var(--fg-1)" }}>Grafana Dashboard</span>
+        </div>
+        <div className="flex items-center gap-2">
+          {available === false && (
+            <span className="font-mono text-[9px] px-2 py-0.5 rounded-full border uppercase tracking-widest"
+              style={{ color: "var(--warn)", borderColor: "color-mix(in srgb, var(--warn) 30%, transparent)", background: "color-mix(in srgb, var(--warn) 8%, transparent)" }}>
+              Grafana Offline
+            </span>
+          )}
+          <a href={GRAFANA_URL} target="_blank" rel="noreferrer"
+            className="font-mono text-[10px] uppercase tracking-widest flex items-center gap-1 transition-colors"
+            style={{ color: "var(--accent)" }}>
+            Open <span className="material-symbols-outlined" style={{ fontSize: 14 }}>open_in_new</span>
+          </a>
+        </div>
+      </div>
+
+      {available ? (
+        <iframe
+          src={`${GRAFANA_URL}/?orgId=1&theme=dark&kiosk&refresh=5s`}
+          width="100%" height={500} frameBorder="0"
+          className="bg-transparent" loading="lazy" style={{ border: "none" }}
+        />
+      ) : (
+        <div className="flex flex-col items-center justify-center gap-3 py-16" style={{ color: "var(--fg-4)" }}>
+          <span className="material-symbols-outlined" style={{ fontSize: 48, opacity: 0.2 }}>monitoring</span>
+          <p className="font-mono text-[11px] text-center max-w-sm">
+            Grafana is not detected at <code className="text-[10px]" style={{ color: "var(--data)" }}>{GRAFANA_URL}</code>
+          </p>
+          <div className="font-mono text-[9px] text-center max-w-md space-y-1 mt-2"
+            style={{ color: "var(--fg-4)" }}>
+            <p className="font-semibold" style={{ color: "var(--fg-3)" }}>To enable Grafana dashboards:</p>
+            <code className="block px-3 py-2 rounded-lg text-left" style={{ background: "var(--bg-elevated)" }}>
+              cd monitoring{"\n"}docker compose up -d
+            </code>
+            <p className="mt-2">Prometheus metrics are still shown natively above ↑</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Sparkline key config — typed explicitly to fix TS error
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+interface SparkKey {
+  name: string;
+  labels: Record<string, string> | undefined;
+  key: string;
+}
+
+const SPARK_KEYS: SparkKey[] = [
+  { name: "tollgate_pipeline_runs_total", labels: { status: "completed" }, key: "p_ok" },
+  { name: "tollgate_tests_total", labels: { result: "passed" }, key: "t_pass" },
+  { name: "tollgate_pipeline_duration_seconds_sum", labels: undefined, key: "p_dur" },
+  { name: "tollgate_healer_confidence_score", labels: undefined, key: "h_conf" },
 ];
 
-const errorLogs = [
-  { time: "13:42:01.04", service: "Auth-Svc",   level: "CRITICAL", cls: "bg-neg/15 text-neg",              desc: "Handshake timeout on internal TLS 1.3 listener",  trace: "#882-ef31" },
-  { time: "13:41:58.22", service: "AI-Node-04", level: "WARNING",  cls: "bg-warn/15 text-warn",            desc: "VRAM saturation exceeded threshold (94%)",          trace: "#901-ac88" },
-  { time: "13:41:55.11", service: "DB-Main",    level: "INFO",     cls: "bg-[var(--bg-elevated)] text-fg-3", desc: "Replica lag recovered to < 50ms",                 trace: "#044-db2a" },
-];
+/* ═══════════════════════════════════════════════════════════════════════════
+   Page State
+   ═══════════════════════════════════════════════════════════════════════════ */
 
-const bottomStats = [
-  { label: "CPU LOAD", value: "34%",     delta: "-2.4%",  dc: "text-pos",  icon: "memory"    },
-  { label: "MEM USE",  value: "8.4GB",   delta: "+0.1%",  dc: "text-warn", icon: "database"  },
-  { label: "NET IN",   value: "1.2GB/s", delta: "Stable", dc: "text-data", icon: "download"  },
-  { label: "NET OUT",  value: "842MB/s", delta: "+12.2%", dc: "text-data", icon: "upload"    },
-];
+interface PageState {
+  metrics: MetricsMap;
+  online: boolean | null;
+  updatedAt: string;
+  sparks: Record<string, number[]>;
+}
+
+const INITIAL: PageState = { metrics: {}, online: null, updatedAt: "", sparks: {} };
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MetricsPage
+   ═══════════════════════════════════════════════════════════════════════════ */
 
 export default function MetricsPage() {
+  const [s, setS] = useState<PageState>(INITIAL);
+  const [tab, setTab] = useState<"prometheus" | "grafana">("prometheus");
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
+
+  /* ─── Poller ─── */
+  useEffect(() => {
+    mountedRef.current = true;
+
+    async function poll() {
+      try {
+        const res = await fetch("/api/prometheus");
+        const data = await res.json();
+        if (!mountedRef.current) return;
+
+        if (data.status === "success" && data.metrics) {
+          setS((prev) => {
+            const newSparks = { ...prev.sparks };
+            for (const sk of SPARK_KEYS) {
+              const val = mv(data.metrics, sk.name, sk.labels);
+              const arr = newSparks[sk.key] || [];
+              newSparks[sk.key] = [...arr.slice(-(MAX_SPARK - 1)), val];
+            }
+            return { metrics: data.metrics, online: true, updatedAt: new Date().toLocaleTimeString(), sparks: newSparks };
+          });
+        } else {
+          setS((prev) => prev.online === false ? prev : { ...prev, online: false });
+        }
+      } catch {
+        setS((prev) => prev.online === false ? prev : { ...prev, online: false });
+      }
+
+      if (mountedRef.current) {
+        timerRef.current = setTimeout(poll, POLL_MS);
+      }
+    }
+
+    timerRef.current = setTimeout(poll, 800);
+    return () => {
+      mountedRef.current = false;
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  /* ─── Derived values ─── */
+  const m = s.metrics;
+  const pOk = mv(m, "tollgate_pipeline_runs_total", { status: "completed" });
+  const pFail = mv(m, "tollgate_pipeline_runs_total", { status: "failed" });
+  const pTotal = pOk + pFail;
+  const active = mv(m, "tollgate_active_pipelines");
+  const tPass = mv(m, "tollgate_tests_total", { result: "passed" });
+  const tFail = mv(m, "tollgate_tests_total", { result: "failed" });
+  const tTotal = tPass + tFail;
+  const passRate = tTotal > 0 ? ((tPass / tTotal) * 100).toFixed(1) : "—";
+  const hConf = mv(m, "tollgate_healer_confidence_score");
+  const hTotal = msum(m, "tollgate_healer_runs_total");
+  const pDurCount = mv(m, "tollgate_pipeline_duration_seconds_count");
+  const pDurSum = mv(m, "tollgate_pipeline_duration_seconds_sum");
+  const avgDur = pDurCount > 0 ? pDurSum / pDurCount : 0;
+  const apiTotal = msum(m, "tollgate_api_requests_total");
+
+  /* histogram */
+  const BUCKETS = [1, 5, 10, 30, 60, 120, 300, 600];
+  const bucketLabels = BUCKETS.map((b) => (b < 60 ? `${b}s` : `${b / 60}m`));
+  const bucketData = BUCKETS.map((b) =>
+    mv(m, "tollgate_pipeline_duration_seconds_bucket", { le: b % 1 === 0 ? `${b}.0` : String(b) }),
+  );
+  const diffData = bucketData.map((v, i) => (i === 0 ? v : Math.max(0, v - bucketData[i - 1])));
+  const hasHistogram = diffData.some((v) => v > 0);
+
+  /* metric count */
+  const metricCount = Object.keys(m).length;
+
+  /* ═══════════════ RENDER ═══════════════ */
   return (
     <>
-      <TopBar activeLabel="System Metrics" />
+      <TopBar activeLabel="Observability" />
 
       <main className="p-8 space-y-8 max-w-[1600px]">
-        <header className="flex justify-between items-end">
+        {/* ── Header ── */}
+        <header className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
           <div className="space-y-1">
-            <h1 className="text-4xl font-headline font-bold tracking-tight text-fg-1">System Metrics</h1>
-            <p className="font-mono text-[11px] text-fg-4 uppercase tracking-widest">
-              Observability · regional cluster-01-prod
+            <h1 className="text-4xl font-headline font-bold tracking-tight" style={{ color: "var(--fg-1)" }}>
+              System Metrics
+            </h1>
+            <p className="font-mono text-[11px] uppercase tracking-widest" style={{ color: "var(--fg-4)" }}>
+              Prometheus · Real-time Agent Observability
             </p>
           </div>
-          <div className="flex gap-3 font-mono text-[11px]">
-            <div className="glass-panel px-4 py-2 rounded-lg">
-              <span className="text-fg-3">UPTIME:</span>
-              <span className="text-accent font-bold ml-2">99.982%</span>
+
+          <div className="flex gap-3 items-center flex-wrap">
+            {/* Connection pill */}
+            <div className="glass-panel px-4 py-2 rounded-lg flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full" style={{
+                background: s.online === null ? "var(--warn)" : s.online ? "var(--pos)" : "var(--neg)",
+              }} />
+              <span className="font-mono text-[10px] uppercase tracking-widest" style={{ color: "var(--fg-3)" }}>
+                {s.online === null ? "Connecting…" : s.online ? "AI Engine Online" : "AI Engine Offline"}
+              </span>
             </div>
-            <div className="glass-panel px-4 py-2 rounded-lg">
-              <span className="text-fg-3">REQ/S:</span>
-              <span className="text-accent font-bold ml-2">12.4k</span>
+
+            {/* Last updated */}
+            {s.updatedAt && (
+              <div className="glass-panel px-4 py-2 rounded-lg">
+                <span className="font-mono text-[10px]" style={{ color: "var(--fg-4)" }}>
+                  Updated: <span style={{ color: "var(--accent)" }}>{s.updatedAt}</span>
+                </span>
+              </div>
+            )}
+
+            {/* Tab toggle */}
+            <div className="glass-panel rounded-lg flex overflow-hidden">
+              <button onClick={() => setTab("prometheus")}
+                className="px-3 py-2 font-mono text-[10px] uppercase tracking-widest transition-colors"
+                style={{ color: tab === "prometheus" ? "var(--accent)" : "var(--fg-4)", background: tab === "prometheus" ? "var(--accent-soft)" : "transparent" }}>
+                Prometheus
+              </button>
+              <button onClick={() => setTab("grafana")}
+                className="px-3 py-2 font-mono text-[10px] uppercase tracking-widest transition-colors"
+                style={{ color: tab === "grafana" ? "var(--vi)" : "var(--fg-4)", background: tab === "grafana" ? "var(--vi-soft)" : "transparent" }}>
+                Grafana
+              </button>
             </div>
           </div>
         </header>
 
-        <div className="grid grid-cols-12 gap-6">
-
-          {/* Resource Saturation Chart */}
-          <section className="col-span-12 lg:col-span-8 glass-panel p-6 rounded-xl">
-            <div className="flex justify-between items-center mb-8">
-              <h2 className="font-headline text-base font-semibold flex items-center gap-2 text-fg-1">
-                <span className="material-symbols-outlined text-accent" style={{ fontSize: "18px" }}>query_stats</span>
-                Resource Saturation & Throughput
-              </h2>
-              <div className="flex gap-1.5">
-                {["1H", "6H", "24H"].map((t, i) => (
-                  <button key={t} className={`font-mono text-[10px] px-3 py-1 rounded-lg uppercase tracking-widest transition-colors ${i === 0 ? "bg-[var(--accent-soft)] text-accent" : "text-fg-3 hover:bg-[var(--bg-elevated)]"}`}>{t}</button>
-                ))}
-              </div>
+        {tab === "grafana" ? (
+          /* ═══ Grafana Tab ═══ */
+          <GrafanaEmbed />
+        ) : (
+          /* ═══ Prometheus Tab ═══ */
+          <div className="space-y-6">
+            {/* Stat cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+              <StatCard label="Pipeline Runs" value={pTotal.toFixed(0)}
+                sub={`${pOk.toFixed(0)} ok · ${pFail.toFixed(0)} failed`}
+                subColor={pFail > 0 ? "var(--neg)" : "var(--pos)"} icon="route"
+                spark={s.sparks.p_ok} sparkColor="var(--pos)" />
+              <StatCard label="Test Pass Rate" value={passRate === "—" ? "—" : `${passRate}%`}
+                sub={`${tPass.toFixed(0)} / ${tTotal.toFixed(0)} tests`}
+                subColor="var(--data)" icon="check_circle"
+                spark={s.sparks.t_pass} sparkColor="var(--pos)" />
+              <StatCard label="Avg Pipeline Duration" value={avgDur > 0 ? fmtDur(avgDur) : "—"}
+                sub={active > 0 ? `${active} active` : "Idle"}
+                subColor={active > 0 ? "var(--warn)" : "var(--fg-4)"} icon="timer"
+                spark={s.sparks.p_dur} sparkColor="var(--accent)" />
+              <StatCard label="Healer Confidence" value={hConf > 0 ? `${(hConf * 100).toFixed(1)}%` : "—"}
+                sub={`${hTotal.toFixed(0)} invocations`}
+                subColor="var(--vi)" icon="psychology"
+                spark={s.sparks.h_conf} sparkColor="var(--vi)" />
             </div>
-            <div className="h-[280px] w-full flex items-end justify-between gap-1 relative">
-              <div className="absolute inset-0 flex flex-col justify-between pointer-events-none">
-                {[0, 1, 2, 3].map(i => <div key={i} className="border-t border-[var(--bd)] w-full" />)}
-              </div>
-              {chartBars.map((h, i) => (
-                <div
-                  key={i}
-                  className={`flex-1 rounded-t-sm relative transition-all hover:opacity-80 cursor-pointer ${i === 7 ? "bg-vi/20 hover:bg-vi/30" : "bg-accent/10 hover:bg-accent/20"}`}
-                  style={{ height: `${h}%` }}
-                >
-                  <div className={`absolute top-0 w-full h-0.5 rounded-full ${i === 7 ? "bg-vi" : "bg-accent"}`} />
+
+            {/* Chart + Latency */}
+            <div className="grid grid-cols-12 gap-6">
+              <section className="col-span-12 lg:col-span-8 glass-panel p-6 rounded-xl">
+                <div className="flex justify-between items-center mb-6">
+                  <h2 className="font-headline text-base font-semibold flex items-center gap-2" style={{ color: "var(--fg-1)" }}>
+                    <span className="material-symbols-outlined" style={{ fontSize: 18, color: "var(--accent)" }}>query_stats</span>
+                    Pipeline Duration Distribution
+                  </h2>
                 </div>
-              ))}
-            </div>
-            <div className="flex justify-between mt-4 font-mono text-[9px] text-fg-4 uppercase tracking-widest">
-              {["12:00 PM", "12:15 PM", "12:30 PM", "12:45 PM", "01:00 PM"].map(t => <span key={t}>{t}</span>)}
-            </div>
-          </section>
-
-          {/* Service Trace Latency */}
-          <section className="col-span-12 lg:col-span-4 glass-panel p-6 rounded-xl">
-            <h2 className="font-headline text-base font-semibold mb-6 flex items-center gap-2 text-fg-1">
-              <span className="material-symbols-outlined text-accent" style={{ fontSize: "18px" }}>alt_route</span>
-              Service Trace Latency
-            </h2>
-            <div className="space-y-5">
-              {services.map((s) => (
-                <div key={s.name} className="space-y-2">
-                  <div className="flex justify-between font-mono text-[11px]">
-                    <span className="text-fg-3">{s.name}</span>
-                    <span className={s.highlight ? "text-warn font-bold" : "text-accent"}>{s.latency}</span>
+                {hasHistogram ? (
+                  <BarChart data={diffData} labels={bucketLabels} color="var(--accent)" h={220} />
+                ) : (
+                  <div className="flex flex-col items-center justify-center gap-2" style={{ height: 220, color: "var(--fg-4)" }}>
+                    <span className="material-symbols-outlined" style={{ fontSize: 36, opacity: 0.2 }}>bar_chart</span>
+                    <p className="font-mono text-[10px]">Run a pipeline to see duration histogram</p>
                   </div>
-                  <div className="w-full bg-[var(--bg-elevated)] rounded-full h-1 overflow-hidden">
-                    <div className={`h-full rounded-full ${s.highlight ? "bg-warn" : "bg-accent"}`} style={{ width: `${s.pct}%` }} />
-                  </div>
-                </div>
-              ))}
-              <div className="pt-4 mt-2 border-t border-[var(--bd)] flex items-center justify-between font-mono text-[10px] text-fg-4 uppercase tracking-widest">
-                <span>Global Average</span>
-                <span className="font-bold text-fg-1">71ms</span>
+                )}
+              </section>
+              <div className="col-span-12 lg:col-span-4">
+                <AgentLatency m={m} />
               </div>
             </div>
-          </section>
 
-          {/* Error Logs */}
-          <section className="col-span-12 glass-panel rounded-xl overflow-hidden">
-            <div className="px-6 py-4 border-b border-[var(--bd)] flex justify-between items-center">
-              <h2 className="font-headline text-base font-semibold flex items-center gap-2 text-fg-1">
-                <span className="material-symbols-outlined text-neg" style={{ fontSize: "18px" }}>emergency_home</span>
-                Live Error Logs
-              </h2>
-              <button className="font-mono text-[10px] uppercase tracking-widest text-accent flex items-center gap-1 hover:underline">
-                View all <span className="material-symbols-outlined" style={{ fontSize: "14px" }}>arrow_outward</span>
-              </button>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left">
-                <thead className="bg-[var(--bg-elevated)] font-mono text-[9px] uppercase tracking-widest text-fg-4">
-                  <tr>
-                    {["Timestamp", "Service", "Level", "Event Description", "Trace ID"].map((h, i) => (
-                      <th key={h} className={`px-6 py-3 ${i === 4 ? "text-right" : ""}`}>{h}</th>
+            {/* API Requests + Process Metrics */}
+            <div className="grid grid-cols-12 gap-6">
+              <div className="col-span-12 lg:col-span-6">
+                <ApiRequests m={m} />
+              </div>
+              <div className="col-span-12 lg:col-span-6">
+                <div className="glass-panel p-5 rounded-xl">
+                  <div className="flex items-center gap-2 mb-5">
+                    <span className="material-symbols-outlined" style={{ fontSize: 16, color: "var(--data)" }}>memory</span>
+                    <span className="text-sm font-headline font-semibold" style={{ color: "var(--fg-1)" }}>Process Metrics</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    {[
+                      { label: "API Requests", val: fmt(apiTotal, 0), icon: "http", c: "var(--data)" },
+                      { label: "RAG Queries", val: fmt(msum(m, "tollgate_rag_queries_total"), 0), icon: "search", c: "var(--vi)" },
+                      { label: "Tests Executed", val: fmt(tTotal, 0), icon: "science", c: "var(--pos)" },
+                      { label: "Failed Tests", val: fmt(tFail, 0), icon: "error", c: "var(--neg)" },
+                    ].map(({ label, val, icon, c }) => (
+                      <div key={label} className="p-4 rounded-xl border flex flex-col gap-2"
+                        style={{ borderColor: "var(--bd)", background: "var(--bg-elevated)" }}>
+                        <div className="flex justify-between items-start">
+                          <span className="font-mono text-[9px] uppercase tracking-widest" style={{ color: "var(--fg-4)" }}>{label}</span>
+                          <span className="material-symbols-outlined" style={{ fontSize: 16, color: c }}>{icon}</span>
+                        </div>
+                        <span className="text-2xl font-headline font-bold" style={{ color: "var(--fg-1)" }}>{val}</span>
+                      </div>
                     ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[var(--bd)]">
-                  {errorLogs.map((log, i) => (
-                    <tr key={i} className="hover:bg-[var(--bg-elevated)] transition-colors">
-                      <td className="px-6 py-4 font-mono text-[10px] text-fg-4 tabular-nums">{log.time}</td>
-                      <td className="px-6 py-4 font-mono text-xs font-semibold text-fg-2">{log.service}</td>
-                      <td className="px-6 py-4">
-                        <span className={`px-2 py-0.5 rounded-full font-mono text-[9px] font-bold uppercase tracking-wider ${log.cls}`}>{log.level}</span>
-                      </td>
-                      <td className="px-6 py-4 font-mono text-[11px] text-fg-3">{log.desc}</td>
-                      <td className="px-6 py-4 text-right font-mono text-[10px] text-fg-4">{log.trace}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          {/* Bottom stat cards */}
-          <div className="col-span-12 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-            {bottomStats.map((s) => (
-              <div key={s.label} className="glass-panel p-5 rounded-xl flex flex-col justify-between h-28">
-                <div className="flex justify-between items-start">
-                  <span className="font-mono text-[9px] uppercase tracking-widest text-fg-4">{s.label}</span>
-                  <span className="material-symbols-outlined text-accent" style={{ fontSize: "18px" }}>{s.icon}</span>
-                </div>
-                <div className="flex items-baseline gap-2">
-                  <span className="text-3xl font-headline font-bold text-fg-1">{s.value}</span>
-                  <span className={`font-mono text-[10px] ${s.dc}`}>{s.delta}</span>
+                  </div>
                 </div>
               </div>
-            ))}
+            </div>
+
+            {/* Info banner */}
+            <div className="glass-panel p-5 rounded-xl border-l-2 flex flex-col md:flex-row items-start md:items-center gap-4"
+              style={{ borderLeftColor: "var(--accent)" }}>
+              <span className="material-symbols-outlined" style={{ fontSize: 24, color: "var(--accent)" }}>info</span>
+              <div className="flex-1">
+                <p className="text-sm font-semibold" style={{ color: "var(--fg-1)" }}>Prometheus Endpoint Active</p>
+                <p className="font-mono text-[10px] mt-1" style={{ color: "var(--fg-3)" }}>
+                  Scrape:{" "}
+                  <code className="px-1.5 py-0.5 rounded" style={{ background: "var(--bg-elevated)", color: "var(--data)" }}>
+                    http://localhost:8000/metrics
+                  </code>
+                  {" · "}Polling {POLL_MS / 1000}s · {metricCount} families loaded
+                </p>
+              </div>
+            </div>
           </div>
-        </div>
+        )}
       </main>
     </>
   );
