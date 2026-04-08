@@ -1,0 +1,16 @@
+# Prometheus configuration for TollGate AI Engine
+# Scrapes the FastAPI /metrics endpoint
+
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: "tollgate-ai-engine"
+    static_configs:
+      - targets: ["host.docker.internal:8000"]
+        labels:
+          service: "tollgate"
+          environment: "development"
+    metrics_path: "/metrics"
+    scrape_interval: 5s

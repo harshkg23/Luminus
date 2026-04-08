@@ -2,16 +2,31 @@
 FastAPI server for TollGate AI Engine.
 
 Exposes HTTP endpoints that call the LangGraph pipeline.
+Includes Prometheus instrumentation for real observability.
 """
 
 import os
+import time
 from pathlib import Path
 from typing import Any
 
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+# ── Prometheus ──────────────────────────────────────────────────────────────
+from prometheus_client import (
+    Counter,
+    Histogram,
+    Gauge,
+    Info,
+    generate_latest,
+    CONTENT_TYPE_LATEST,
+    CollectorRegistry,
+    REGISTRY,
+)
 
 from sentinel.graph import build_phase1_graph, build_healer_graph, build_healer_only_graph
 from sentinel.state import SentinelState
@@ -25,6 +40,127 @@ app = FastAPI(
     version="1.0.0",
     description="LangGraph-powered test generation and analysis service",
 )
+
+# ── CORS — allow the Next.js frontend to query /metrics & /prom/* ──────────
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ── Prometheus Metrics ─────────────────────────────────────────────────────
+
+# Pipeline
+PIPELINE_RUNS = Counter(
+    "tollgate_pipeline_runs_total",
+    "Total number of pipeline executions",
+    ["status"],  # completed | failed
+)
+PIPELINE_DURATION = Histogram(
+    "tollgate_pipeline_duration_seconds",
+    "Pipeline execution duration in seconds",
+    buckets=[1, 5, 10, 30, 60, 120, 300, 600],
+)
+
+# Agent steps
+AGENT_STEP_DURATION = Histogram(
+    "tollgate_agent_step_duration_seconds",
+    "Duration of individual agent steps",
+    ["agent"],
+    buckets=[0.5, 1, 2, 5, 10, 30, 60, 120],
+)
+
+# Tests
+TESTS_TOTAL = Counter(
+    "tollgate_tests_total",
+    "Total tests executed",
+    ["result"],  # passed | failed
+)
+TESTS_PER_RUN = Histogram(
+    "tollgate_tests_per_run",
+    "Number of tests per pipeline run",
+    buckets=[1, 5, 10, 20, 50, 100],
+)
+
+# Healer
+HEALER_CONFIDENCE = Gauge(
+    "tollgate_healer_confidence_score",
+    "Latest healer confidence score",
+)
+HEALER_RUNS = Counter(
+    "tollgate_healer_runs_total",
+    "Total healer invocations",
+    ["decision"],  # ship | block | skip
+)
+
+# Test plan generation
+TEST_PLAN_DURATION = Histogram(
+    "tollgate_test_plan_generation_seconds",
+    "Time to generate a test plan (Architect agent)",
+    buckets=[1, 2, 5, 10, 30, 60],
+)
+
+# API requests
+API_REQUESTS = Counter(
+    "tollgate_api_requests_total",
+    "Total API requests",
+    ["method", "endpoint", "status_code"],
+)
+API_LATENCY = Histogram(
+    "tollgate_api_request_duration_seconds",
+    "API request latency",
+    ["method", "endpoint"],
+    buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
+)
+
+# RAG memory
+RAG_QUERIES = Counter(
+    "tollgate_rag_queries_total",
+    "Total RAG vector DB queries",
+    ["agent"],
+)
+RAG_MATCHES = Histogram(
+    "tollgate_rag_matches_per_query",
+    "Number of RAG matches returned per query",
+    ["agent"],
+    buckets=[0, 1, 2, 3, 5, 10],
+)
+
+# Server info
+SERVER_INFO = Info("tollgate_server", "TollGate AI Engine metadata")
+SERVER_INFO.info({
+    "version": "1.0.0",
+    "llm_provider": os.getenv("LLM_PROVIDER", "openai"),
+})
+
+# Active pipelines (gauge)
+ACTIVE_PIPELINES = Gauge(
+    "tollgate_active_pipelines",
+    "Number of currently running pipelines",
+)
+
+
+# ── Middleware: auto-count every request ────────────────────────────────────
+@app.middleware("http")
+async def prometheus_middleware(request: Request, call_next):
+    """Record request count + latency for every API call."""
+    start = time.time()
+    response: Response = await call_next(request)
+    elapsed = time.time() - start
+
+    path = request.url.path
+    # Collapse path params but keep main route segments
+    API_REQUESTS.labels(
+        method=request.method,
+        endpoint=path,
+        status_code=str(response.status_code),
+    ).inc()
+    API_LATENCY.labels(
+        method=request.method,
+        endpoint=path,
+    ).observe(elapsed)
+    return response
 
 # Compile graphs once at startup — reused for every request
 _phase1_graph = build_phase1_graph()
@@ -155,6 +291,49 @@ async def health_check():
     }
 
 
+@app.get("/metrics")
+async def prometheus_metrics():
+    """Expose Prometheus metrics for scraping."""
+    return Response(
+        content=generate_latest(REGISTRY),
+        media_type=CONTENT_TYPE_LATEST,
+    )
+
+
+@app.get("/prom/query")
+async def prom_query_proxy(query: str = "", timeout: str = "30s"):
+    """
+    Lightweight PromQL-compatible query endpoint.
+    Returns metrics in a Prometheus-API-compatible JSON envelope so the
+    Next.js frontend can render native charts WITHOUT needing a separate
+    Prometheus server running.
+    """
+    from prometheus_client.parser import text_string_to_metric_families
+
+    raw = generate_latest(REGISTRY).decode("utf-8")
+    results = []
+
+    for family in text_string_to_metric_families(raw):
+        if query and query not in family.name:
+            continue
+        for sample in family.samples:
+            results.append({
+                "metric": {
+                    "__name__": sample.name,
+                    **{k: v for k, v in (sample.labels or {}).items()},
+                },
+                "value": [int(time.time()), str(sample.value)],
+            })
+
+    return {
+        "status": "success",
+        "data": {
+            "resultType": "vector",
+            "result": results,
+        },
+    }
+
+
 @app.post("/generate-test-plan", response_model=GenerateTestPlanResponse)
 async def generate_test_plan(request: GenerateTestPlanRequest):
     """
@@ -163,6 +342,7 @@ async def generate_test_plan(request: GenerateTestPlanRequest):
     Runs the LangGraph Architect node with the provided code context.
     Falls back to mock mode if no LLM API key is configured.
     """
+    start = time.time()
     try:
         graph = _phase1_graph
 
@@ -187,6 +367,15 @@ async def generate_test_plan(request: GenerateTestPlanRequest):
                 status_code=500, detail="Graph execution succeeded but no test_plan in state"
             )
 
+        # Record Prometheus metrics
+        elapsed = time.time() - start
+        TEST_PLAN_DURATION.observe(elapsed)
+        AGENT_STEP_DURATION.labels(agent="architect").observe(elapsed)
+        rag_matches = int(result.get("rag_architect_matches", 0))
+        if rag_matches > 0:
+            RAG_QUERIES.labels(agent="architect").inc()
+            RAG_MATCHES.labels(agent="architect").observe(rag_matches)
+
         # Detect if we used mock or real LLM
         provider = os.getenv("LLM_PROVIDER", "openai")
         has_key = bool(
@@ -198,7 +387,7 @@ async def generate_test_plan(request: GenerateTestPlanRequest):
         return GenerateTestPlanResponse(
             test_plan=test_plan,
             provider=provider_used,
-            rag_architect_matches=int(result.get("rag_architect_matches", 0)),
+            rag_architect_matches=rag_matches,
             rag_architect_insights=str(result.get("rag_architect_insights", "")),
         )
 
@@ -216,6 +405,8 @@ async def run_pipeline(request: RunPipelineRequest):
     Next.js side), the graph skips re-running tests and goes straight to decision
     → Healer → Courier.
     """
+    start = time.time()
+    ACTIVE_PIPELINES.inc()
     try:
         from uuid import uuid4
 
@@ -232,8 +423,6 @@ async def run_pipeline(request: RunPipelineRequest):
         }
 
         if request.test_results is not None:
-            # Test results pre-supplied → skip architect + run_tests,
-            # go straight to decision → healer → courier
             initial_state["test_results"] = request.test_results
             graph = _healer_graph
         else:
@@ -241,16 +430,36 @@ async def run_pipeline(request: RunPipelineRequest):
 
         result = graph.invoke(initial_state)
 
+        # ── Prometheus: record pipeline metrics ──
+        elapsed = time.time() - start
+        PIPELINE_RUNS.labels(status="completed").inc()
+        PIPELINE_DURATION.observe(elapsed)
+
+        # Record test results
+        test_results = result.get("test_results") or []
+        passed = sum(1 for t in test_results if t.get("status") == "passed")
+        failed = sum(1 for t in test_results if t.get("status") != "passed")
+        TESTS_TOTAL.labels(result="passed").inc(passed)
+        TESTS_TOTAL.labels(result="failed").inc(failed)
+        TESTS_PER_RUN.observe(len(test_results))
+
+        # Record healer metrics
+        decision = str(result.get("decision", ""))
+        confidence = result.get("confidence_score")
+        if confidence is not None:
+            HEALER_CONFIDENCE.set(float(confidence))
+            HEALER_RUNS.labels(decision=decision).inc()
+
         return RunPipelineResponse(
             session_id=str(result.get("session_id", "")),
-            decision=str(result.get("decision", "")),
+            decision=decision,
             test_plan=str(result.get("test_plan", "")),
-            test_results=result.get("test_results") or [],
+            test_results=test_results,
             rca_type=result.get("rca_type"),
             rca_report=result.get("rca_report"),
             proposed_fix=result.get("proposed_fix"),
             proposed_patch=result.get("proposed_patch"),
-            confidence_score=result.get("confidence_score"),
+            confidence_score=confidence,
             fix_branch=result.get("fix_branch"),
             target_files=result.get("target_files"),
             dispatch_action=result.get("dispatch_action"),
@@ -260,7 +469,11 @@ async def run_pipeline(request: RunPipelineRequest):
         )
 
     except Exception as e:
+        PIPELINE_RUNS.labels(status="failed").inc()
+        PIPELINE_DURATION.observe(time.time() - start)
         raise HTTPException(status_code=500, detail=f"Pipeline execution failed: {e}")
+    finally:
+        ACTIVE_PIPELINES.dec()
 
 
 @app.post("/run-healer", response_model=RunHealerResponse)
@@ -272,6 +485,7 @@ async def run_healer(request: RunHealerRequest):
     Returns the RCA analysis and proposed patch so the caller can bundle
     code fixes into a unified PR alongside test scripts.
     """
+    start = time.time()
     try:
         from uuid import uuid4
 
@@ -293,6 +507,19 @@ async def run_healer(request: RunHealerRequest):
 
         result = _healer_only_graph.invoke(initial_state)
 
+        # ── Prometheus: record healer metrics ──
+        elapsed = time.time() - start
+        AGENT_STEP_DURATION.labels(agent="healer").observe(elapsed)
+        decision = str(result.get("decision", ""))
+        confidence = result.get("confidence_score")
+        if confidence is not None:
+            HEALER_CONFIDENCE.set(float(confidence))
+        HEALER_RUNS.labels(decision=decision).inc()
+        rag_matches = int(result.get("rag_healer_matches", 0))
+        if rag_matches > 0:
+            RAG_QUERIES.labels(agent="healer").inc()
+            RAG_MATCHES.labels(agent="healer").observe(rag_matches)
+
         raw_edits = result.get("file_edits") or []
         file_edits = [
             FileEdit(file=e["file"], search=e["search"], replace=e["replace"])
@@ -302,16 +529,16 @@ async def run_healer(request: RunHealerRequest):
 
         return RunHealerResponse(
             session_id=str(result.get("session_id", "")),
-            decision=str(result.get("decision", "")),
+            decision=decision,
             rca_type=result.get("rca_type"),
             rca_report=result.get("rca_report"),
             proposed_fix=result.get("proposed_fix"),
             proposed_patch=result.get("proposed_patch"),
             file_edits=file_edits if file_edits else None,
-            confidence_score=result.get("confidence_score"),
+            confidence_score=confidence,
             fix_branch=result.get("fix_branch"),
             target_files=result.get("target_files"),
-            rag_healer_matches=int(result.get("rag_healer_matches", 0)),
+            rag_healer_matches=rag_matches,
             rag_healer_insights=str(result.get("rag_healer_insights", "")),
         )
 
@@ -383,9 +610,10 @@ if __name__ == "__main__":
     port = int(os.getenv("PORT", "8000"))
     host = os.getenv("HOST", "0.0.0.0")
 
-    print(f"🚀 Starting TollGate AI Engine on {host}:{port}")
-    print(f"   LLM Provider: {os.getenv('LLM_PROVIDER', 'openai')}")
-    print(f"   Docs: http://{host}:{port}/docs")
+    print(f"[*] Starting TollGate AI Engine on {host}:{port}")
+    print(f"    LLM Provider: {os.getenv('LLM_PROVIDER', 'openai')}")
+    print(f"    Docs: http://{host}:{port}/docs")
+    print(f"    Metrics: http://{host}:{port}/metrics")
 
     uvicorn.run(
         app,
