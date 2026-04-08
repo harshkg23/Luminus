@@ -44,3 +44,6 @@ next-env.d.ts
 agents/
 CLAUDE.md
 AGENTS.md
+
+# local nested project
+Hack-nocturne/
