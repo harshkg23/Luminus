@@ -165,3 +165,26 @@ body {
   box-shadow: 0 0 7px var(--data);
   flex-shrink: 0;
 }
+
+/* Pipeline live flow — glowing edges when a step completes */
+.pipeline-edge-glow {
+  animation: pipeline-glow-pulse 1.8s ease-in-out infinite;
+}
+@keyframes pipeline-glow-pulse {
+  0%, 100% {
+    filter: drop-shadow(0 0 3px var(--accent)) drop-shadow(0 0 8px color-mix(in srgb, var(--accent) 55%, transparent));
+    opacity: 1;
+  }
+  50% {
+    filter: drop-shadow(0 0 6px var(--accent)) drop-shadow(0 0 14px color-mix(in srgb, var(--accent) 70%, transparent));
+    opacity: 0.88;
+  }
+}
+
+.pipeline-node-running {
+  animation: pipeline-node-pulse 1.4s ease-in-out infinite;
+}
+@keyframes pipeline-node-pulse {
+  0%, 100% { filter: drop-shadow(0 0 0 transparent); }
+  50% { filter: drop-shadow(0 0 10px color-mix(in srgb, var(--accent) 45%, transparent)); }
+}
