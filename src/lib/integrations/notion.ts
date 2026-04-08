@@ -1,34 +1,76 @@
 import "server-only";
 import { Client } from "@notionhq/client";
 
-export type NotionAgent = "pipeline" | "reviewer" | "courier";
+// ── Types ──────────────────────────────────────────────────────────────────
+
+export type NotionAgent =
+  | "pipeline"
+  | "architect"
+  | "scripter"
+  | "watchdog"
+  | "healer"
+  | "courier"
+  | "reviewer";
+
 export type NotionEvent =
   | "Pipeline Start"
+  | "Pipeline Complete"
+  | "Pipeline Failed"
   | "Review Completed"
-  | "Slack Notified"
-  | "Pipeline Failed";
+  | "PR Created"
+  | "Issue Created"
+  | "Test Failure";
 
-interface NotionReportInput {
+export type NotionStatus = "In Progress" | "Needs Review" | "Fixed" | "Failed";
+
+export interface NotionReportInput {
   title: string;
   repo: string;
   agent: NotionAgent;
   event: NotionEvent;
   confidence?: number;
   prLink?: string;
-  status?: "In Progress" | "Fixed" | "Needs Review" | "Failed";
+  status?: NotionStatus;
   context?: string;
 }
+
+/** Optional metadata callers can attach to pipeline webhooks for Notion logging. */
+export interface NotionLogMeta {
+  repo?: string;
+  prNumber?: number;
+  confidence?: number;
+  prLink?: string;
+  context?: string;
+}
+
+// ── Client ─────────────────────────────────────────────────────────────────
 
 function getNotionClient(): Client | null {
   if (!process.env.NOTION_TOKEN) return null;
   return new Client({ auth: process.env.NOTION_TOKEN });
 }
 
-function defaultStatus(event: NotionEvent): "In Progress" | "Fixed" | "Needs Review" | "Failed" {
-  if (event === "Pipeline Start") return "In Progress";
-  if (event === "Pipeline Failed") return "Failed";
-  return "Needs Review";
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+function defaultStatus(event: NotionEvent): NotionStatus {
+  switch (event) {
+    case "Pipeline Start":
+      return "In Progress";
+    case "Pipeline Complete":
+      return "Fixed";
+    case "Pipeline Failed":
+    case "Test Failure":
+      return "Failed";
+    case "Review Completed":
+    case "PR Created":
+    case "Issue Created":
+      return "Needs Review";
+    default:
+      return "Needs Review";
+  }
 }
+
+// ── Core: createNotionReport ───────────────────────────────────────────────
 
 export async function createNotionReport(input: NotionReportInput): Promise<{
   success: boolean;
@@ -57,7 +99,7 @@ export async function createNotionReport(input: NotionReportInput): Promise<{
         Event: {
           select: { name: input.event },
         },
-        Timestamp: {
+        TimeStamp: {
           date: { start: new Date().toISOString() },
         },
         Status: {
@@ -75,6 +117,7 @@ export async function createNotionReport(input: NotionReportInput): Promise<{
     const pageId = page.id;
     const pageUrl = (page as { url?: string }).url;
 
+    // Append context as a code block inside the page body
     if (input.context?.trim()) {
       await notion.blocks.children.append({
         block_id: pageId,
@@ -105,4 +148,25 @@ export async function createNotionReport(input: NotionReportInput): Promise<{
       error: error instanceof Error ? error.message : "Failed to create Notion page",
     };
   }
+}
+
+// ── Pipeline helper: logEvent ──────────────────────────────────────────────
+
+/**
+ * Fire-and-forget Notion logger for the TollGate pipeline.
+ *
+ * Call this wherever a pipeline event occurs. It will never throw or block
+ * the caller — errors are silently swallowed so the pipeline is unaffected.
+ */
+export function logEvent(input: {
+  title: string;
+  repo: string;
+  agent: NotionAgent;
+  event: NotionEvent;
+  status?: NotionStatus;
+  confidence?: number;
+  prLink?: string;
+  context?: string;
+}): void {
+  void createNotionReport(input).catch(() => {});
 }
