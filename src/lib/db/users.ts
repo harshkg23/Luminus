@@ -1,5 +1,6 @@
 import { ObjectId, type Collection } from "mongodb";
-import clientPromise from "@/lib/mongodb";
+import mongoose from "mongoose";
+import { connectDB } from "@/lib/mongodb";
 
 export interface DBUser {
   _id?: ObjectId;
@@ -24,8 +25,9 @@ export interface PublicUser {
 }
 
 async function col(): Promise<Collection<DBUser>> {
-  const client = await clientPromise;
-  return client.db().collection<DBUser>("users");
+  await connectDB();
+  const raw = mongoose.connection.getClient().db().collection("users");
+  return raw as Collection<DBUser>;
 }
 
 export async function findUserByEmail(email: string): Promise<DBUser | null> {
