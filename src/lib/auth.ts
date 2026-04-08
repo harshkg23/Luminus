@@ -89,13 +89,5 @@ export const authOptions: NextAuthOptions = {
     },
   },
 
-<<<<<<< HEAD
-  pages: {
-    signIn: "/auth",
-    error: "/auth",
-  },
-
-=======
->>>>>>> 63b4ada (feat: implement authentication with NextAuth, OAuth providers, and MongoDB integration)
   secret: process.env.NEXTAUTH_SECRET,
 };
