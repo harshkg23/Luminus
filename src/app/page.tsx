@@ -159,7 +159,7 @@ export default function LandingPage() {
           </h1>
 
           <p
-            className="text-lg md:text-xl font-medium max-w-2xl mx-auto leading-relaxed mb-12"
+            className="text-lg md:text-xl max-w-2xl mx-auto leading-relaxed mb-12"
             style={{ color: "var(--fg-3)" }}
           >
             tollGate is the first autonomous AI co-pilot that doesn&apos;t just find
@@ -228,7 +228,7 @@ export default function LandingPage() {
             >
               The Kinetic Loop
             </h2>
-            <p className="font-medium" style={{ color: "var(--fg-3)", lineHeight: 1.7 }}>
+            <p style={{ color: "var(--fg-3)", lineHeight: 1.7 }}>
               Our agents operate in a continuous high-precision cycle, evolving from
               simple detection to autonomous repair.
             </p>
@@ -319,7 +319,7 @@ export default function LandingPage() {
                           </span>
                         </div>
                         <p
-                          className="text-[11px] font-medium leading-relaxed"
+                          className="text-[11px] leading-relaxed"
                           style={{ color: "var(--fg-4)" }}
                         >
                           {step.sub}
@@ -344,7 +344,7 @@ export default function LandingPage() {
             >
               Built for Elite Teams
             </h2>
-            <p className="font-medium" style={{ color: "var(--fg-3)" }}>
+            <p style={{ color: "var(--fg-3)" }}>
               Not just another linter — a full autonomous loop from detection to
               deployment.
             </p>
@@ -383,7 +383,7 @@ export default function LandingPage() {
                 >
                   RAG-Powered Memory
                 </h3>
-                <p className="font-medium" style={{ color: "var(--fg-3)", lineHeight: 1.7, maxWidth: 400 }}>
+                <p style={{ color: "var(--fg-3)", lineHeight: 1.7, maxWidth: 400 }}>
                   Every fix is stored in a specialized vector database. Your
                   organization&apos;s collective intelligence compounds with every pull
                   request, creating a bespoke engineering immune system.
@@ -423,7 +423,7 @@ export default function LandingPage() {
               >
                 Fix-Ready Patches
               </h3>
-              <p className="text-sm font-medium leading-relaxed" style={{ color: "var(--fg-3)" }}>
+              <p className="text-sm leading-relaxed" style={{ color: "var(--fg-3)" }}>
                 Forget suggestions. We generate ready-to-merge code diffs validated
                 with &gt;0.7 confidence scoring before you even see them.
               </p>
@@ -473,7 +473,7 @@ export default function LandingPage() {
                 >
                   Semantic Diff Understanding
                 </h3>
-                <p className="font-medium" style={{ color: "var(--fg-3)", lineHeight: 1.7 }}>
+                <p style={{ color: "var(--fg-3)", lineHeight: 1.7 }}>
                   Unlike LLMs that look at lines of text, tollGate analyzes structural
                   changes in your Abstract Syntax Tree. We understand logic, not just
                   strings.
@@ -511,7 +511,7 @@ export default function LandingPage() {
           >
             Seamlessly Integrated
           </h2>
-          <p className="mb-14 font-medium" style={{ color: "var(--fg-3)" }}>
+          <p className="mb-14" style={{ color: "var(--fg-3)" }}>
             Plugs into your existing stack in minutes.
           </p>
           <div className="grid grid-cols-3 md:grid-cols-6 gap-6 max-w-3xl mx-auto">
@@ -597,7 +597,7 @@ export default function LandingPage() {
                   <span style={{ color: "var(--accent)" }}>Start shipping fixes.</span>
                 </h2>
                 <p
-                  className="text-lg font-medium mb-12 max-w-xl mx-auto"
+                  className="text-lg mb-12 max-w-xl mx-auto"
                   style={{ color: "var(--fg-3)" }}
                 >
                   Join 2,000+ engineering teams automating their technical debt
@@ -640,13 +640,13 @@ export default function LandingPage() {
               </span>
             </div>
             <p
-              className="text-sm font-medium max-w-xs leading-relaxed mb-5"
+              className="text-sm max-w-xs leading-relaxed mb-5"
               style={{ color: "var(--fg-4)" }}
             >
               Autonomous AI for elite engineering teams. The kinetic bridge between
               code and production.
             </p>
-            <p className="text-sm font-medium" style={{ color: "var(--fg-4)" }}>
+            <p className="text-sm" style={{ color: "var(--fg-4)" }}>
               © 2024 tollGate AI. Engineered for precision.
             </p>
           </div>
