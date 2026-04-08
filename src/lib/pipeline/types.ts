@@ -26,3 +26,19 @@ export interface PipelineSnapshot {
   logs: LogEntry[];
   updatedAt: number;
 }
+
+/** Optional rich context for Slack — pass as `slack` on the pipeline webhook body. */
+export interface PipelineSlackMeta {
+  repo?: string;
+  branch?: string;
+  targetUrl?: string;
+  prNumber?: number;
+  sessionId?: string;
+  durationMs?: number;
+  passed?: number;
+  failed?: number;
+  failedSteps?: Array<{ step: string; error: string }>;
+  /** e.g. "Manual pipeline run triggered" */
+  runKind?: string;
+}
+
