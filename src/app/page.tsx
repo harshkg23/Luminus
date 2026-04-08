@@ -229,7 +229,7 @@ export default function Dashboard() {
                 <p className="text-fg-4 italic">Waiting for pipeline events… run the pipeline to see live logs.</p>
               ) : (
                 <div className="space-y-2">
-                  {snapshot.logs.map((l, i) => (
+                  {snapshot.logs.map((l: LogEntry, i: number) => (
                     <div key={`${l.ts}-${i}`} className="flex gap-4">
                       <span className="text-fg-4 shrink-0 tabular-nums">{formatTs(l.ts)}</span>
                       {l.step && <span className="text-accent shrink-0">[{l.step}]</span>}
