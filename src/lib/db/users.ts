@@ -27,7 +27,7 @@ export interface PublicUser {
 async function col(): Promise<Collection<DBUser>> {
   await connectDB();
   const raw = mongoose.connection.getClient().db().collection("users");
-  return raw as Collection<DBUser>;
+  return raw as unknown as Collection<DBUser>;
 }
 
 export async function findUserByEmail(email: string): Promise<DBUser | null> {
