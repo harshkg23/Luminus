@@ -42,7 +42,7 @@ def build_initial_state(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run SentinelQA AI engine workflow")
+    parser = argparse.ArgumentParser(description="Run TollGate AI engine workflow")
     parser.add_argument("--all-pass", action="store_true", help="Simulate all tests passing in mock test mode")
     parser.add_argument("--empty-changed-files", action="store_true", help="Run with changed_files=[]")
     parser.add_argument("--force-mock", action="store_true", help="Bypass live LLM and use mock Architect output")

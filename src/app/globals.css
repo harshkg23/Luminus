@@ -127,6 +127,43 @@ body {
   color: var(--fg-1);
 }
 
+/* ─── Hack-nocturne dashboard compat (glass / neon) ─── */
+.glass {
+  background: color-mix(in srgb, var(--bg-card) 55%, transparent);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid var(--bd);
+}
+.glass-strong {
+  background: color-mix(in srgb, var(--bg-elevated) 70%, transparent);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid var(--bd-2);
+}
+.neon-border {
+  border: 1px solid color-mix(in srgb, var(--data) 35%, var(--bd));
+}
+.glow-cyan {
+  box-shadow: 0 0 22px color-mix(in srgb, var(--data) 28%, transparent);
+}
+
+/* shadcn-style aliases on Luminus tokens */
+.bg-background { background-color: var(--bg-base); }
+.text-foreground { color: var(--fg-1); }
+.text-muted-foreground { color: var(--fg-3); }
+.border-border { border-color: var(--bd); }
+.bg-card { background-color: var(--bg-card); }
+.bg-muted { background-color: var(--bg-elevated); }
+.text-primary { color: var(--accent); }
+.bg-primary { background-color: var(--accent); }
+.text-primary-foreground { color: #fff; }
+.text-secondary { color: var(--data); }
+.bg-secondary { background-color: color-mix(in srgb, var(--data) 18%, transparent); }
+.border-border\/30 { border-color: color-mix(in srgb, var(--bd) 70%, transparent); }
+.border-border\/40 { border-color: color-mix(in srgb, var(--bd) 85%, transparent); }
+.border-border\/50 { border-color: var(--bd-2); }
+.ring-offset-background { --tw-ring-offset-color: var(--bg-base); }
+
 /* ─── Component classes ─── */
 .glass-panel {
   background: var(--glass-bg);

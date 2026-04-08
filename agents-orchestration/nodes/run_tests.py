@@ -34,9 +34,14 @@ def _parse_repo(repo_url: str) -> tuple[str | None, str | None]:
 
 
 def _get_backend_url() -> str:
-    base_url = os.getenv("SENTINEL_BACKEND_URL", "http://localhost:3000").strip().rstrip("/")
+    base_url = (
+        os.getenv("TOLLGATE_BACKEND_URL", "").strip()
+        or os.getenv("SENTINEL_BACKEND_URL", "http://localhost:3000").strip()
+    ).rstrip("/")
     if not base_url:
-        raise ValueError("SENTINEL_BACKEND_URL is required when RUN_TESTS_MODE=api")
+        raise ValueError(
+            "TOLLGATE_BACKEND_URL or SENTINEL_BACKEND_URL is required when RUN_TESTS_MODE=api"
+        )
     return base_url
 
 

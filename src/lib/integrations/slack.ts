@@ -14,7 +14,9 @@ export async function sendSlackReviewSummary(input: {
   highSeverity: number;
   channel?: string;
 }): Promise<void> {
-  const webhook = process.env.SLACK_WEBHOOK_URL;
+  const webhook =
+    process.env.SLACK_WEBHOOK_URL?.trim() ||
+    process.env.SLACK_PIPELINE_WEBHOOK_URL?.trim();
   if (!webhook) return;
 
   const payload: Record<string, unknown> = {
@@ -42,8 +44,12 @@ export async function sendSlackReviewSummary(input: {
     ],
   };
 
-  if (input.channel?.trim()) {
-    payload.channel = input.channel.trim();
+  const ch =
+    input.channel?.trim() ||
+    process.env.SLACK_NOTIFICATION_CHANNEL?.trim() ||
+    process.env.PIPELINE_SLACK_DEFAULT_CHANNEL?.trim();
+  if (ch) {
+    payload.channel = ch.startsWith("#") || ch.startsWith("C") ? ch : `#${ch}`;
   }
 
   await fetch(webhook, {

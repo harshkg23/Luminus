@@ -37,7 +37,13 @@ export async function GET(request: NextRequest) {
   const owner = request.nextUrl.searchParams.get("owner")?.trim() ?? "";
   const repo = request.nextUrl.searchParams.get("repo")?.trim() ?? "";
   const query = request.nextUrl.searchParams.get("query")?.trim().toLowerCase() ?? "";
-  const mode = (request.nextUrl.searchParams.get("mode")?.trim() as "docker" | "npx" | null) ?? "npx";
+  // Hack-nocturne / TollGate uses `github_mcp_mode`; Luminus UI uses `mode`.
+  const modeParam =
+    request.nextUrl.searchParams.get("mode")?.trim() ??
+    request.nextUrl.searchParams.get("github_mcp_mode")?.trim() ??
+    "";
+  const mode = (modeParam || "npx") as "docker" | "npx";
+  const state = request.nextUrl.searchParams.get("state")?.trim() || "open";
 
   if (!owner || !repo) {
     return NextResponse.json({ error: "Missing owner or repo query parameter." }, { status: 400 });
@@ -47,7 +53,7 @@ export async function GET(request: NextRequest) {
 
   try {
     await client.start(mode);
-    const prs = mapPullRequests(await client.listPullRequests(owner, repo, "open"));
+    const prs = mapPullRequests(await client.listPullRequests(owner, repo, state));
     const filtered = query
       ? prs.filter((pr) =>
           `${pr.number} ${pr.title} ${pr.author} ${pr.headRef} ${pr.baseRef}`
@@ -61,6 +67,7 @@ export async function GET(request: NextRequest) {
       repo,
       count: filtered.length,
       pullRequests: filtered,
+      pull_requests: filtered,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to fetch pull requests.";
