@@ -1,138 +1,149 @@
+import Link from "next/link";
+
+const features = [
+  {
+    title: "Async PR Intelligence",
+    description:
+      "Analyze pull requests in the background and deliver review-ready findings in minutes.",
+  },
+  {
+    title: "Security and Reliability",
+    description:
+      "Catch risky patterns, dependency issues, and weak auth checks before they reach production.",
+  },
+  {
+    title: "Architecture Guardrails",
+    description:
+      "Enforce repository conventions and layer boundaries with consistent, low-noise checks.",
+  },
+  {
+    title: "Explainable Suggestions",
+    description:
+      "Every recommendation includes reasoning, impact, and practical next actions for developers.",
+  },
+];
+
+const stats = [
+  { label: "Average review turnaround", value: "< 5 min" },
+  { label: "False-positive focused design", value: "Low noise" },
+  { label: "Supported VCS providers", value: "GitHub + GitLab" },
+];
+
 export default function Home() {
-  const keyOutcomes = [
-    "Catch bugs before human review starts",
-    "Flag security vulnerabilities and risky patterns",
-    "Enforce architecture rules with low false positives",
-    "Generate contextual, actionable inline comments",
-  ];
-
-  const capabilities = [
-    {
-      title: "Asynchronous PR Analysis",
-      description:
-        "Scans pull requests in the background and returns insights in minutes, not hours.",
-    },
-    {
-      title: "Security and Reliability Radar",
-      description:
-        "Detects potential injections, auth gaps, unsafe dependencies, and fragile logic paths.",
-    },
-    {
-      title: "Architectural Consistency Guard",
-      description:
-        "Tracks code smells and design rule violations across modules, services, and layers.",
-    },
-    {
-      title: "Explainable AI Feedback",
-      description:
-        "Every comment includes reasoning, impact, and a practical next step for developers.",
-    },
-  ];
-
   return (
-    <div className="min-h-screen bg-[#060816] text-white">
-      <main className="mx-auto flex w-full max-w-6xl flex-col gap-14 px-6 py-10 md:px-10 lg:px-14">
-        <section className="relative overflow-hidden rounded-3xl border border-white/15 bg-[radial-gradient(circle_at_10%_20%,rgba(59,130,246,0.25),transparent_45%),radial-gradient(circle_at_90%_10%,rgba(168,85,247,0.35),transparent_40%),linear-gradient(135deg,#111736,#080b1d_55%,#070913)] p-8 shadow-2xl shadow-blue-950/40 md:p-12">
-          <div className="absolute -top-12 right-16 h-44 w-44 rounded-full bg-violet-500/20 blur-3xl" />
-          <div className="absolute -bottom-16 left-14 h-56 w-56 rounded-full bg-blue-500/20 blur-3xl" />
+    <div className="relative min-h-screen overflow-hidden bg-[#050816] text-white">
+      <div className="pointer-events-none absolute -left-24 top-20 h-80 w-80 rounded-full bg-cyan-500/20 blur-[100px]" />
+      <div className="pointer-events-none absolute -right-20 top-0 h-[26rem] w-[26rem] rounded-full bg-violet-500/20 blur-[120px]" />
 
-          <div className="relative z-10 flex flex-col gap-8">
-            <div className="inline-flex w-fit items-center rounded-full border border-cyan-300/40 bg-cyan-300/10 px-4 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-100">
-              Problem Statement 2 - AI-Powered Code Review Co-Pilot
+      <main className="relative mx-auto flex w-full max-w-6xl flex-col px-6 pb-16 pt-8 md:px-10 lg:px-12">
+        <header className="mb-12 flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3 backdrop-blur md:px-6">
+          <div className="flex items-center gap-3">
+            <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-cyan-300 to-blue-500" />
+            <div>
+              <p className="text-sm font-semibold tracking-wide text-slate-100">Luminus</p>
+              <p className="text-xs text-slate-400">AI Review Copilot</p>
             </div>
+          </div>
 
-            <div className="max-w-3xl space-y-5">
-              <h1 className="text-4xl font-black leading-tight sm:text-5xl md:text-6xl">
-                Luminus Review Copilot
-                <span className="block bg-linear-to-r from-blue-300 via-cyan-200 to-violet-300 bg-clip-text text-transparent">
-                  Your Autonomous Pull Request Intelligence
-                </span>
-              </h1>
-              <p className="text-base leading-7 text-blue-100/90 md:text-lg">
-                A creative AI assistant that reviews pull requests asynchronously,
-                detects bugs and security risks, spots code smells, validates
-                architecture decisions, and posts contextual inline feedback on
-                GitHub or GitLab with minimal noise.
-              </p>
-            </div>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/auth"
+              className="rounded-lg border border-white/20 px-4 py-2 text-sm font-medium text-slate-100 transition hover:border-cyan-300/60 hover:bg-cyan-400/10"
+            >
+              Login
+            </Link>
+            <Link
+              href="/auth"
+              className="rounded-lg bg-gradient-to-r from-cyan-400 to-blue-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:opacity-90"
+            >
+              Sign Up
+            </Link>
+          </div>
+        </header>
 
-            <div className="flex flex-wrap gap-3">
-              <button className="rounded-full bg-linear-to-r from-cyan-400 to-blue-500 px-6 py-3 text-sm font-bold text-slate-950 transition hover:scale-[1.02]">
-                Start Reviewing in Background
+        <section className="relative overflow-hidden rounded-3xl border border-white/10 bg-[linear-gradient(140deg,#0f1635_0%,#0b1230_40%,#111028_100%)] p-7 shadow-2xl shadow-blue-950/30 md:p-12">
+          <div className="absolute -bottom-24 right-0 h-72 w-72 rounded-full bg-blue-500/20 blur-3xl" />
+          <div className="absolute -top-16 left-1/3 h-44 w-44 rounded-full bg-violet-500/20 blur-3xl" />
+
+          <div className="relative z-10 max-w-4xl">
+            <p className="mb-4 inline-flex rounded-full border border-cyan-300/30 bg-cyan-300/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-cyan-100">
+              Problem Statement 2 - AI-Powered Code Review
+            </p>
+
+            <h1 className="text-4xl font-black leading-tight sm:text-5xl md:text-6xl">
+              Make pull request reviews
+              <span className="block bg-gradient-to-r from-cyan-200 via-blue-200 to-violet-300 bg-clip-text text-transparent">
+                fast, reliable, and explainable
+              </span>
+            </h1>
+
+            <p className="mt-5 max-w-3xl text-base leading-7 text-slate-300 md:text-lg">
+              Luminus runs asynchronous code review workflows that catch bugs,
+              security risks, and architecture violations, then posts contextual
+              feedback your team can act on immediately.
+            </p>
+
+            <div className="mt-8 flex flex-wrap gap-3">
+              <Link
+                href="/auth"
+                className="rounded-xl bg-gradient-to-r from-cyan-400 to-blue-500 px-6 py-3 text-sm font-bold text-slate-950 transition hover:scale-[1.02]"
+              >
+                Start Reviewing
+              </Link>
+              <button className="rounded-xl border border-white/20 bg-white/5 px-6 py-3 text-sm font-semibold text-slate-100 transition hover:border-cyan-300/60 hover:bg-cyan-300/10">
+                View Demo Workflow
               </button>
-              <button className="rounded-full border border-white/30 bg-white/5 px-6 py-3 text-sm font-semibold text-white transition hover:border-cyan-300/70 hover:bg-cyan-300/10">
-                View Architecture Rules
-              </button>
-            </div>
-
-            <div className="grid gap-3 pt-2 sm:grid-cols-2">
-              {keyOutcomes.map((item) => (
-                <div
-                  key={item}
-                  className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-100 backdrop-blur"
-                >
-                  {item}
-                </div>
-              ))}
             </div>
           </div>
         </section>
 
-        <section className="grid gap-4 md:grid-cols-2">
-          {capabilities.map((capability) => (
-            <article
-              key={capability.title}
-              className="rounded-2xl border border-white/10 bg-white/3 p-6 transition hover:-translate-y-1 hover:border-blue-300/40 hover:bg-white/6"
+        <section className="mt-6 grid gap-3 md:grid-cols-3">
+          {stats.map((item) => (
+            <div
+              key={item.label}
+              className="rounded-2xl border border-white/10 bg-white/[0.03] px-5 py-4 backdrop-blur"
             >
-              <h2 className="text-xl font-bold text-cyan-100">{capability.title}</h2>
-              <p className="mt-3 text-sm leading-7 text-slate-300">
-                {capability.description}
-              </p>
+              <p className="text-xs uppercase tracking-widest text-slate-400">{item.label}</p>
+              <p className="mt-2 text-xl font-semibold text-cyan-100">{item.value}</p>
+            </div>
+          ))}
+        </section>
+
+        <section className="mt-10 grid gap-4 md:grid-cols-2">
+          {features.map((feature) => (
+            <article
+              key={feature.title}
+              className="group rounded-2xl border border-white/10 bg-gradient-to-br from-white/[0.06] to-white/[0.02] p-6 transition hover:-translate-y-0.5 hover:border-cyan-300/40"
+            >
+              <h2 className="text-lg font-bold text-slate-100 transition group-hover:text-cyan-200">
+                {feature.title}
+              </h2>
+              <p className="mt-2 text-sm leading-7 text-slate-300">{feature.description}</p>
             </article>
           ))}
         </section>
 
-        <section className="rounded-3xl border border-blue-300/20 bg-[linear-gradient(120deg,rgba(37,99,235,0.12),rgba(14,165,233,0.05),rgba(168,85,247,0.1))] p-8 md:p-10">
+        <section className="mt-10 rounded-3xl border border-cyan-300/20 bg-gradient-to-r from-cyan-500/10 via-blue-500/10 to-violet-500/10 p-8 text-center">
           <h3 className="text-2xl font-extrabold text-white md:text-3xl">
-            How The Copilot Works
+            Ready to ship cleaner pull requests?
           </h3>
-          <div className="mt-7 grid gap-4 md:grid-cols-4">
-            {[
-              "PR webhook triggers analysis pipeline",
-              "AI inspects diffs + history + dependency graph",
-              "Risk score computed with architecture policies",
-              "Inline comments published with explanation",
-            ].map((step, index) => (
-              <div
-                key={step}
-                className="rounded-2xl border border-white/15 bg-slate-900/50 p-4"
-              >
-                <p className="text-xs font-bold uppercase tracking-widest text-cyan-300">
-                  Step {index + 1}
-                </p>
-                <p className="mt-2 text-sm leading-6 text-slate-200">{step}</p>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="rounded-2xl border border-white/10 bg-[#0a1024] p-8">
-          <p className="text-center text-sm uppercase tracking-[0.2em] text-slate-400">
-            Built For Accuracy, Scalability, And Developer Trust
+          <p className="mx-auto mt-3 max-w-2xl text-sm leading-7 text-slate-300 md:text-base">
+            Sign in and connect your repositories to start receiving intelligent,
+            explainable feedback on every PR.
           </p>
-          <div className="mt-6 flex flex-wrap items-center justify-center gap-3 text-sm text-slate-200">
-            <span className="rounded-full border border-cyan-300/40 px-4 py-2">
-              Low false positives
-            </span>
-            <span className="rounded-full border border-cyan-300/40 px-4 py-2">
-              Repo-specific policies
-            </span>
-            <span className="rounded-full border border-cyan-300/40 px-4 py-2">
-              Multi-language support
-            </span>
-            <span className="rounded-full border border-cyan-300/40 px-4 py-2">
-              Human-in-the-loop controls
-            </span>
+          <div className="mt-6 flex items-center justify-center gap-3">
+            <Link
+              href="/auth"
+              className="rounded-xl bg-gradient-to-r from-cyan-400 to-blue-500 px-6 py-3 text-sm font-bold text-slate-950 transition hover:opacity-90"
+            >
+              Login
+            </Link>
+            <Link
+              href="/auth"
+              className="rounded-xl border border-white/20 bg-white/5 px-6 py-3 text-sm font-semibold text-slate-100 transition hover:border-cyan-300/60"
+            >
+              Create Account
+            </Link>
           </div>
         </section>
       </main>
