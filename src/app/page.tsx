@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import TopBar from "@/components/TopBar";
-import type { PipelineSnapshot } from "@/lib/pipeline/types";
+import type { PipelineSnapshot, LogEntry } from "@/lib/pipeline/types";
 
 /* ─── static agent squad config (names / icons only — status comes from SSE) ─── */
 const AGENT_CFG = [
