@@ -70,20 +70,25 @@ export const authOptions: NextAuthOptions = {
 
     async jwt({ token, user }) {
       if (user) {
-        token.id    = user.id;
-        token.name  = user.name;
-        token.email = user.email;
-        token.image = (user as { image?: string }).image;
+        token.id = user.id;
+        // NextAuth already puts name/email/picture on `token` for OAuth & credentials.
+        // Avoid duplicating the avatar as `image` — it can push the JWE over cookie limits and trigger HTTP 431.
+      }
+      const t = token as Record<string, unknown>;
+      if (t.picture && t.image) {
+        delete t.image;
       }
       return token;
     },
 
     async session({ session, token }) {
       if (session.user) {
-        (session.user as { id?: string }).id    = token.id as string;
-        session.user.name  = token.name;
+        (session.user as { id?: string }).id = token.id as string;
+        session.user.name = token.name;
         session.user.email = token.email;
-        session.user.image = token.image as string | null | undefined;
+        session.user.image =
+          (token.picture as string | null | undefined) ??
+          (token.image as string | null | undefined);
       }
       return session;
     },

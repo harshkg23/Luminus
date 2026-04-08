@@ -129,6 +129,8 @@ function SignInForm() {
             {oauthProviders.map((p) => (
               <button
                 key={p.id}
+                type="button"
+                suppressHydrationWarning
                 onClick={() => signIn(p.id, { callbackUrl })}
                 className={`w-full flex items-center justify-center gap-3 py-2.5 px-4 rounded-lg font-mono text-[11px] uppercase tracking-widest transition-all ${p.bg} ${p.text}`}
               >
@@ -166,6 +168,7 @@ function SignInForm() {
                 onChange={(e) => setEmail(e.target.value)}
                 required
                 placeholder="you@example.com"
+                suppressHydrationWarning
                 className="w-full bg-white/3 border border-white/8 rounded-lg px-3 py-2.5 font-mono text-xs text-on-surface placeholder:text-[#b9caca]/20 focus:outline-none focus:border-[#00f5ff]/40 focus:ring-1 focus:ring-[#00f5ff]/20 transition-all"
               />
             </div>
@@ -181,10 +184,12 @@ function SignInForm() {
                   onChange={(e) => setPassword(e.target.value)}
                   required
                   placeholder="••••••••"
+                  suppressHydrationWarning
                   className="w-full bg-white/3 border border-white/8 rounded-lg px-3 py-2.5 pr-10 font-mono text-xs text-on-surface placeholder:text-[#b9caca]/20 focus:outline-none focus:border-[#00f5ff]/40 focus:ring-1 focus:ring-[#00f5ff]/20 transition-all"
                 />
                 <button
                   type="button"
+                  suppressHydrationWarning
                   onClick={() => setShowPw(!showPw)}
                   className="absolute right-3 top-2.5 text-[#b9caca]/25 hover:text-[#00dce5] transition-colors"
                 >
@@ -198,6 +203,7 @@ function SignInForm() {
             <button
               type="submit"
               disabled={loading}
+              suppressHydrationWarning
               className="w-full mt-1 py-2.5 bg-[#00f5ff] text-[#003739] font-mono font-bold text-[11px] uppercase tracking-widest rounded-lg hover:brightness-110 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               {loading ? (
