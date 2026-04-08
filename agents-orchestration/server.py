@@ -13,7 +13,12 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from sentinel.graph import build_phase1_graph, build_healer_graph, build_healer_only_graph
+from sentinel.graph import (
+    build_phase1_graph,
+    build_healer_graph,
+    build_healer_only_graph,
+    build_code_reviewer_only_graph,
+)
 from sentinel.state import SentinelState
 
 # Always load agents-orchestration/.env (cwd-independent — fixes missing OPENAI_API_KEY).
@@ -30,6 +35,7 @@ app = FastAPI(
 _phase1_graph = build_phase1_graph()
 _healer_graph = build_healer_graph()
 _healer_only_graph = build_healer_only_graph()
+_code_reviewer_only_graph = build_code_reviewer_only_graph()
 
 # ── Request/Response Models ─────────────────────────────────────────────────
 
@@ -119,6 +125,34 @@ class FileEdit(BaseModel):
     file: str
     search: str
     replace: str
+
+
+class CodeReviewFinding(BaseModel):
+    category: str | None = None
+    severity: str | None = None
+    file: str | None = None
+    title: str | None = None
+    detail: str | None = None
+    fix_applied_in_edit: bool | None = None
+
+
+class RunCodeReviewRequest(BaseModel):
+    repo_url: str
+    changed_files: list[str] = []
+    target_url: str
+    branch: str | None = "main"
+    git_diff: str | None = None
+    session_id: str | None = None
+    force_mock: bool = False
+    pr_head_file_contents: list[PrHeadFileContent] = []
+
+
+class RunCodeReviewResponse(BaseModel):
+    session_id: str
+    review_report_md: str
+    findings: list[CodeReviewFinding] = []
+    file_edits: list[FileEdit] | None = None
+    confidence_score: float | None = None
 
 
 class RunHealerResponse(BaseModel):
@@ -317,6 +351,67 @@ async def run_healer(request: RunHealerRequest):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Healer execution failed: {e}")
+
+
+@app.post("/run-code-review", response_model=RunCodeReviewResponse)
+async def run_code_review(request: RunCodeReviewRequest):
+    """
+    Full PR review: security, performance, maintainability, reliability, accessibility.
+    Returns narrative markdown plus optional file_edits for the orchestrator to apply.
+    """
+    try:
+        from uuid import uuid4
+
+        initial_state: SentinelState = {
+            "repo_url": request.repo_url,
+            "changed_files": request.changed_files,
+            "target_url": request.target_url,
+            "git_diff": request.git_diff or "",
+            "session_id": request.session_id or f"review_{uuid4().hex}",
+            "branch": request.branch or "main",
+            "force_mock": request.force_mock,
+            "pr_head_file_contents": [
+                {"path": item.path.strip(), "content": item.content}
+                for item in request.pr_head_file_contents
+                if item.path.strip()
+            ],
+        }
+
+        result = _code_reviewer_only_graph.invoke(initial_state)
+
+        raw_edits = result.get("file_edits") or []
+        file_edits = [
+            FileEdit(file=e["file"], search=e["search"], replace=e["replace"])
+            for e in raw_edits
+            if isinstance(e, dict) and e.get("file") and e.get("search") and "replace" in e
+        ]
+
+        raw_findings = result.get("findings") or []
+        findings_out: list[CodeReviewFinding] = []
+        if isinstance(raw_findings, list):
+            for f in raw_findings:
+                if isinstance(f, dict):
+                    findings_out.append(
+                        CodeReviewFinding(
+                            category=f.get("category"),
+                            severity=f.get("severity"),
+                            file=f.get("file"),
+                            title=f.get("title"),
+                            detail=f.get("detail"),
+                            fix_applied_in_edit=f.get("fix_applied_in_edit"),
+                        )
+                    )
+
+        return RunCodeReviewResponse(
+            session_id=str(result.get("session_id", initial_state.get("session_id", ""))),
+            review_report_md=str(result.get("review_report_md", "")),
+            findings=findings_out,
+            file_edits=file_edits if file_edits else None,
+            confidence_score=float(result.get("review_confidence_score", 0.0)),
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Code review execution failed: {e}")
 
 
 @app.post("/analyze-failure", response_model=AnalyzeFailureResponse)

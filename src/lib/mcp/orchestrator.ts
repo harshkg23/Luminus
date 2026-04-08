@@ -20,7 +20,7 @@ import { sessionManager } from "./session-manager";
 import { CourierAgent, CourierResult } from "./courier";
 import { emitSessionEvent } from "../websocket/server";
 import { aiEngine } from "./ai-engine-client";
-import type { HealerOnlyResult } from "./ai-engine-client";
+import type { CodeReviewOnlyResult, HealerOnlyResult } from "./ai-engine-client";
 import { generateTestFiles, buildPRBody } from "./test-writer";
 import type { PRBodyOptions } from "./test-writer";
 import { applyFileEdits, applyPatchToExistingBranch } from "../courier/apply-patch";
@@ -213,6 +213,7 @@ export class AgentOrchestrator {
 
         // ── Step 4: Healer (RCA + proposed fix) via LangGraph AI Engine ─────
         let healerOutput: HealerOnlyResult | null = null;
+        let codeReviewOutput: CodeReviewOnlyResult | null = null;
         if (results.failed > 0 && aiEngine.isConnected) {
             console.log("🩺 Step 4: Healer agent running RCA via LangGraph...");
             emitSessionEvent(sessionId, "agent.started", {
@@ -269,6 +270,54 @@ export class AgentOrchestrator {
             } catch (healerErr) {
                 console.warn(`   ⚠️  Healer failed: ${(healerErr as Error).message}`);
                 await sessionManager.updateAgentStatus(sessionId, "healer", "error");
+            }
+        }
+
+        // ── Step 4b: TollGate full PR code review (vs Sentinel: tests-only) ──
+        if (aiEngine.isConnected && prChangedFiles.length > 0) {
+            console.log(
+                "🔍 Step 4b: TollGate full AI code review — security, performance, practices..."
+            );
+            emitSessionEvent(sessionId, "agent.started", {
+                session_id: sessionId,
+                agent_name: "code-review",
+                status: "started",
+                message: "Full PR review: security, optimization, coding standards",
+                timestamp: ts(),
+            });
+            try {
+                const reviewSnapshots =
+                    await this.fetchPrHeadFileSnapshotsForReview(prChangedFiles);
+                if (reviewSnapshots.length > 0) {
+                    console.log(
+                        `   📎 Code review: ${reviewSnapshots.length} file snapshot(s) on PR head`
+                    );
+                }
+                codeReviewOutput = await aiEngine.runCodeReviewOnly({
+                    repoUrl: `${this.config.owner}/${this.config.repo}`,
+                    changedFiles: prChangedFiles,
+                    targetUrl: this.config.targetUrl,
+                    sessionId,
+                    gitDiff: effectiveDiff,
+                    branch: this.config.selectedPr?.headRef ?? this.config.branch,
+                    prHeadFileContents: reviewSnapshots,
+                });
+                const nFindings = codeReviewOutput.findings?.length ?? 0;
+                const nEdits = codeReviewOutput.file_edits?.length ?? 0;
+                console.log(
+                    `   ✅ Code review: ${nFindings} finding(s), ${nEdits} proposed edit(s), confidence=${codeReviewOutput.confidence_score}`
+                );
+                emitSessionEvent(sessionId, "agent.completed", {
+                    session_id: sessionId,
+                    agent_name: "code-review",
+                    status: "completed",
+                    message: `Findings: ${nFindings}, edits: ${nEdits}`,
+                    timestamp: ts(),
+                });
+                await sessionManager.updateAgentStatus(sessionId, "code-review", "success");
+            } catch (reviewErr) {
+                console.warn(`   ⚠️  Code review failed: ${(reviewErr as Error).message}`);
+                await sessionManager.updateAgentStatus(sessionId, "code-review", "error");
             }
         }
 
@@ -367,12 +416,16 @@ export class AgentOrchestrator {
         let postFixResults: import("./types").TestRunOutput | null = null;
         const hasFileEdits = (healerOutput?.file_edits?.length ?? 0) > 0 && (healerOutput?.confidence_score ?? 0) > 0.5;
         const hasHealerFix = hasFileEdits || (healerOutput?.proposed_patch?.trim() && (healerOutput?.confidence_score ?? 0) > 0.5);
+        const hasReviewCodeFix =
+            (codeReviewOutput?.file_edits?.length ?? 0) > 0 &&
+            (codeReviewOutput?.confidence_score ?? 0) >= 0.45;
+        const shouldRerunTests = hasHealerFix || hasReviewCodeFix;
         try {
             console.log("📝 Step 6: Writing tests & fixes, opening unified PR...");
             emitSessionEvent(sessionId, "agent.started", {
               session_id: sessionId, agent_name: "test-writer", status: "started",
-              message: hasHealerFix
-                ? "Generating test files + applying healer code fixes"
+              message: shouldRerunTests
+                ? "Generating test files + applying healer and/or full code review fixes"
                 : "Generating Playwright test files",
               timestamp: ts(),
             });
@@ -393,13 +446,23 @@ export class AgentOrchestrator {
 
             // Use post-fix results for the title if available
             const finalResults = postFixResults ?? results;
-            const prTitle = hasHealerFix
-                ? selectedPr
-                    ? `[TollGate] Fix for PR #${selectedPr.number} (${healerOutput!.rca_type}) — ${finalResults.passed}/${finalResults.total} passed${postFixResults ? " after fix" : ""}`
-                    : `[TollGate] Auto-fix + E2E tests (${healerOutput!.rca_type}) — ${finalResults.passed}/${finalResults.total} passed${postFixResults ? " after fix" : ""}`
-                : selectedPr
-                    ? `[TollGate] E2E tests for PR #${selectedPr.number} (${results.passed}/${results.total} passed)`
-                    : `[TollGate] Auto-generated E2E tests (${results.passed}/${results.total} passed)`;
+            let prTitle: string;
+            const reviewFindingCount = codeReviewOutput?.findings?.length ?? 0;
+            if (shouldRerunTests) {
+                const bits: string[] = [];
+                if (hasReviewCodeFix) bits.push("code review");
+                if (hasHealerFix) bits.push(`healer:${healerOutput?.rca_type ?? "fix"}`);
+                const label = bits.length ? bits.join(" + ") : "fixes";
+                prTitle = selectedPr
+                    ? `[TollGate] ${label} + E2E for PR #${selectedPr.number} — ${finalResults.passed}/${finalResults.total} passed${postFixResults ? " after fix" : ""}`
+                    : `[TollGate] ${label} + E2E — ${finalResults.passed}/${finalResults.total} passed${postFixResults ? " after fix" : ""}`;
+            } else if (selectedPr && reviewFindingCount > 0) {
+                prTitle = `[TollGate] E2E + AI code review (${reviewFindingCount} finding(s)) for PR #${selectedPr.number} — ${results.passed}/${results.total} passed`;
+            } else if (selectedPr) {
+                prTitle = `[TollGate] E2E tests for PR #${selectedPr.number} (${results.passed}/${results.total} passed)`;
+            } else {
+                prTitle = `[TollGate] Auto-generated E2E tests (${results.passed}/${results.total} passed)`;
+            }
 
             const prBodyOptions: PRBodyOptions = {
                 originalPrNumber: selectedPr?.number,
@@ -409,7 +472,17 @@ export class AgentOrchestrator {
                 originalChangedFiles: prChangedFiles.length > 0 ? prChangedFiles : undefined,
                 issueNumber: courierResult?.number,
             };
-            const prBody = buildPRBody(sessionId, testPlan, results, testFiles, codeContext.length, healerOutput, prBodyOptions, postFixResults);
+            const prBody = buildPRBody(
+                sessionId,
+                testPlan,
+                results,
+                testFiles,
+                codeContext.length,
+                healerOutput,
+                prBodyOptions,
+                postFixResults,
+                codeReviewOutput
+            );
 
             const ghClient = new GitHubMCPClient(this.config.githubToken);
             try {
@@ -476,12 +549,33 @@ export class AgentOrchestrator {
                     }
                 }
 
-                // 6b-2. Re-run tests after fix to verify
-                if (hasHealerFix) {
-                    console.log(`   🔄 Step 7: Re-running tests after fix to verify...`);
+                if (hasReviewCodeFix && codeReviewOutput!.file_edits!.length > 0) {
+                    console.log(`   🔍 Applying ${codeReviewOutput!.file_edits!.length} code review edit(s)...`);
+                    const githubTokenReview =
+                        this.config.githubToken
+                        ?? process.env.GITHUB_PERSONAL_ACCESS_TOKEN
+                        ?? process.env.GITHUB_PAT ?? "";
+                    const reviewEditResult = await applyFileEdits({
+                        owner: this.config.owner,
+                        repo: this.config.repo,
+                        branch: branchName,
+                        edits: codeReviewOutput!.file_edits!,
+                        sessionId: `${sessionId}-review`,
+                        githubToken: githubTokenReview,
+                    });
+                    if (reviewEditResult.success) {
+                        console.log(`   ✅ Code review fixes applied via search/replace`);
+                    } else {
+                        console.warn(`   ⚠️  Code review file edits failed: ${reviewEditResult.error}`);
+                    }
+                }
+
+                // 6b-2. Re-run tests after automated fixes to verify
+                if (shouldRerunTests) {
+                    console.log(`   🔄 Step 7: Re-running tests after automated fixes to verify...`);
                     emitSessionEvent(sessionId, "agent.started", {
                       session_id: sessionId, agent_name: "playwright", status: "started",
-                      message: "Re-running tests after healer fix", timestamp: ts(),
+                      message: "Re-running tests after healer / code-review fixes", timestamp: ts(),
                     });
                     try {
                         await this.playwrightClient.start();
@@ -505,12 +599,17 @@ export class AgentOrchestrator {
                 }
 
                 // 6c. Push test files
+                const fixBits: string[] = [];
+                if (hasHealerFix) fixBits.push("healer");
+                if (hasReviewCodeFix) fixBits.push("code-review");
+                const pushMessage = fixBits.length
+                    ? `fix+test(e2e): TollGate (${fixBits.join("+")}) + auto-generated tests\n\nSession: ${sessionId}\nTests: ${results.passed}/${results.total} passed`
+                    : `test(e2e): auto-generated by TollGate pipeline\n\nSession: ${sessionId}\nTests: ${results.passed}/${results.total} passed`;
+
                 const pushRes = await ghClient.pushFiles(
                     this.config.owner, this.config.repo, branchName,
                     testFiles.map((f) => ({ path: f.path, content: f.content })),
-                    hasHealerFix
-                        ? `fix+test(e2e): TollGate healer fix + auto-generated tests\n\nSession: ${sessionId}\nRCA: ${healerOutput?.rca_type ?? "unknown"}\nTests: ${results.passed}/${results.total} passed`
-                        : `test(e2e): auto-generated by TollGate pipeline\n\nSession: ${sessionId}\nTests: ${results.passed}/${results.total} passed`
+                    pushMessage
                 );
                 if (!pushRes.success) {
                     throw new Error(`File push failed: ${pushRes.error}`);
@@ -546,6 +645,11 @@ export class AgentOrchestrator {
                 if (hasHealerFix) {
                     console.log(`   🩺 PR includes healer code fixes for: ${healerOutput!.rca_type}`);
                 }
+                if (hasReviewCodeFix) {
+                    console.log(`   🔎 PR includes automated code review fixes (${codeReviewOutput!.file_edits!.length} edit(s))`);
+                } else if (codeReviewOutput?.review_report_md) {
+                    console.log(`   🔎 PR description includes full code review narrative (no auto-edits applied)`);
+                }
                 if (selectedPr) {
                     console.log(`   🔗 Fix PR branches from PR #${selectedPr.number}'s head — all original files included\n`);
                 }
@@ -553,7 +657,7 @@ export class AgentOrchestrator {
                 emitSessionEvent(sessionId, "courier.pr_created", {
                   session_id: sessionId, type: "pr",
                   url: prUrl, number: prNum,
-                  includes_fix: hasHealerFix,
+                  includes_fix: shouldRerunTests,
                   timestamp: ts(),
                 });
 
@@ -596,7 +700,7 @@ export class AgentOrchestrator {
             if (ghToken) {
                 try {
                     let commentBody: string;
-                    if (hasHealerFix && postFixResults) {
+                    if ((hasHealerFix || hasReviewCodeFix) && postFixResults) {
                         commentBody = `### 🛡️ TollGate — Fix Ready\n\n`
                           + `Fix PR: ${prResult.url}\n\n`
                           + `| | Before Fix | After Fix |\n`
@@ -604,17 +708,31 @@ export class AgentOrchestrator {
                           + `| Passed | ${results.passed}/${results.total} | **${postFixResults.passed}/${postFixResults.total}** |\n`
                           + `| Failed | ${results.failed} | **${postFixResults.failed}** |\n\n`
                           + (postFixResults.failed === 0
-                              ? `✅ **All tests pass after the fix.** Please review and merge.`
-                              : `⚠️ **${postFixResults.failed} test(s) still failing.** Manual review recommended.`);
+                              ? `✅ **All tests pass after automated fixes.** Please review and merge.`
+                              : `⚠️ **${postFixResults.failed} test(s) still failing.** Manual review recommended.`)
+                          + (hasReviewCodeFix && !hasHealerFix
+                              ? `\n\n_Includes **Code Review** fixes (security, performance, practices)._`
+                              : hasReviewCodeFix
+                                  ? `\n\n_Includes **Healer** and **Code Review** fixes._`
+                                  : "");
                     } else if (hasHealerFix) {
                         commentBody = `### 🛡️ TollGate — Fix Ready\n\n`
                           + `Fix PR: ${prResult.url}\n\n`
                           + `Found **${results.failed}** failing test(s). The Healer agent generated code fixes.\n`
-                          + `Please review the fix PR and merge if the changes look correct.`;
+                          + `Please review the fix PR and merge if the changes look correct.`
+                          + (hasReviewCodeFix
+                              ? `\n\nAlso includes **Code Review** fixes (security, performance, best practices).`
+                              : "");
                     } else {
                         commentBody = `### 🛡️ TollGate — Tests Generated\n\n`
                           + `Test PR: ${prResult.url}\n\n`
-                          + `Results: **${results.passed}/${results.total}** tests passed.`;
+                          + `Results: **${results.passed}/${results.total}** tests passed.`
+                          + (hasReviewCodeFix
+                              ? `\n\nIncludes **Code Review** fixes in the PR (see description).`
+                              : "")
+                          + ((codeReviewOutput?.findings?.length ?? 0) > 0 && !hasReviewCodeFix
+                              ? `\n\n**AI code review**: ${codeReviewOutput!.findings!.length} finding(s) documented in the PR.`
+                              : "");
                     }
 
                     const commentRes = await fetch(
@@ -1032,6 +1150,87 @@ export class AgentOrchestrator {
                 out.push({ path, content });
             } catch {
                 // skip file
+            }
+        }
+
+        return out;
+    }
+
+    /**
+     * Broader file set than healer snapshots: review all text-like changed files on PR head.
+     */
+    private async fetchPrHeadFileSnapshotsForReview(
+        relativePaths: string[]
+    ): Promise<Array<{ path: string; content: string }>> {
+        const token =
+            this.config.githubToken ??
+            process.env.GITHUB_PERSONAL_ACCESS_TOKEN ??
+            process.env.GITHUB_PAT;
+        if (!token?.trim()) return [];
+
+        const headRef =
+            this.config.selectedPr?.headRef ?? this.config.branch ?? "main";
+        const { owner, repo } = this.config;
+
+        const reviewExt = [
+            ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".css", ".scss", ".html",
+            ".json", ".md", ".yaml", ".yml", ".vue", ".svelte",
+        ];
+        const skipBase = new Set([
+            "package-lock.json",
+            "yarn.lock",
+            "pnpm-lock.yaml",
+            "npm-shrinkwrap.json",
+            "bun.lockb",
+        ]);
+
+        const candidates = relativePaths.filter((f) => {
+            const lower = f.toLowerCase();
+            const base = lower.split("/").pop() ?? lower;
+            if (skipBase.has(base)) return false;
+            if (base.endsWith(".min.js") || base.endsWith(".min.css")) return false;
+            return reviewExt.some((ext) => lower.endsWith(ext));
+        });
+
+        const MAX_FILES = 30;
+        const MAX_CHARS = 38_000;
+        const out: Array<{ path: string; content: string }> = [];
+
+        for (const path of candidates.slice(0, MAX_FILES)) {
+            try {
+                const encoded = path
+                    .split("/")
+                    .filter(Boolean)
+                    .map(encodeURIComponent)
+                    .join("/");
+                const url = `https://api.github.com/repos/${owner}/${repo}/contents/${encoded}?ref=${encodeURIComponent(headRef)}`;
+                const res = await fetch(url, {
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                        Accept: "application/vnd.github+json",
+                        "X-GitHub-Api-Version": "2022-11-28",
+                    },
+                });
+                if (!res.ok) continue;
+                const data = (await res.json()) as {
+                    content?: string;
+                    encoding?: string;
+                    type?: string;
+                };
+                if (data.type !== "file" || data.encoding !== "base64" || !data.content) {
+                    continue;
+                }
+                const b64 = data.content.replace(/\n/g, "");
+                let content = Buffer.from(b64, "base64").toString("utf-8");
+                const totalLen = content.length;
+                if (content.length > MAX_CHARS) {
+                    content =
+                        content.slice(0, MAX_CHARS) +
+                        `\n\n/* ... truncated (file was ${totalLen} chars) */\n`;
+                }
+                out.push({ path, content });
+            } catch {
+                // skip
             }
         }
 

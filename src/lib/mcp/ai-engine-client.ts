@@ -52,6 +52,25 @@ export interface HealerOnlyResult {
   rag_healer_insights: string;
 }
 
+/** Structured finding from the TollGate code review agent (security, perf, practices). */
+export interface CodeReviewFinding {
+  category?: string | null;
+  severity?: string | null;
+  file?: string | null;
+  title?: string | null;
+  detail?: string | null;
+  fix_applied_in_edit?: boolean | null;
+}
+
+/** Full PR review output — narrative markdown + optional automated fixes. */
+export interface CodeReviewOnlyResult {
+  session_id: string;
+  review_report_md: string;
+  findings: CodeReviewFinding[];
+  file_edits: FileEdit[] | null;
+  confidence_score: number | null;
+}
+
 // ── AI Engine Client ────────────────────────────────────────────────────────
 
 export class AIEngineClient {
@@ -187,6 +206,36 @@ export class AIEngineClient {
       branch: opts.branch ?? "main",
       pr_head_file_contents: opts.prHeadFileContents ?? [],
     }, 120_000);
+  }
+
+  /**
+   * Full PR review: security, performance, maintainability, reliability, accessibility.
+   * Returns markdown for the PR body plus optional file_edits to apply on the fix branch.
+   */
+  async runCodeReviewOnly(opts: {
+    repoUrl: string;
+    changedFiles: string[];
+    targetUrl: string;
+    sessionId: string;
+    gitDiff?: string;
+    branch?: string;
+    prHeadFileContents?: Array<{ path: string; content: string }>;
+  }): Promise<CodeReviewOnlyResult> {
+    if (!this.baseUrl) {
+      throw new Error(
+        "AI_ENGINE_URL is required. No mocks — set AI_ENGINE_URL in .env."
+      );
+    }
+
+    return this.callRemote<CodeReviewOnlyResult>("/run-code-review", {
+      repo_url: opts.repoUrl,
+      changed_files: opts.changedFiles,
+      target_url: opts.targetUrl,
+      session_id: opts.sessionId,
+      git_diff: opts.gitDiff ?? "",
+      branch: opts.branch ?? "main",
+      pr_head_file_contents: opts.prHeadFileContents ?? [],
+    }, 180_000);
   }
 
   // ── Store fix + test plan in RAG vector DB ────────────────────────────────

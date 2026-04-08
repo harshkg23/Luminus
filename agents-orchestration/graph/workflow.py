@@ -7,6 +7,7 @@ from nodes.architect import architect_node
 from nodes.courier_execute import courier_execute_node
 from nodes.courier_decision import courier_decision_node
 from nodes.decision import decision_node
+from nodes.code_reviewer import code_reviewer_node
 from nodes.healer import healer_node
 from nodes.run_tests import run_tests_node
 
@@ -94,5 +95,16 @@ def build_healer_only_graph():
         },
     )
     builder.add_edge("healer", END)
+
+    return builder.compile()
+
+
+def build_code_reviewer_only_graph():
+    """Single-node graph: full PR code review (security, perf, practices) → END."""
+    builder = StateGraph(SentinelState)
+
+    builder.add_node("code_reviewer", code_reviewer_node)
+    builder.set_entry_point("code_reviewer")
+    builder.add_edge("code_reviewer", END)
 
     return builder.compile()
