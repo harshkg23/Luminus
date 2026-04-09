@@ -10,6 +10,35 @@ import { CourierAgent } from "@/lib/mcp/courier";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * Resolve owner/repo from dispatch_payload: repo_url, repo_owner+repo_name, or first
+ * `Repository: ...` line in the markdown body (agents-orchestration always embeds it).
+ */
+function resolveOwnerRepoFromPayload(p: Record<string, unknown>): {
+    owner: string;
+    repo: string;
+} | null {
+    const fromUrl = parseRepoRef(String(p.repo_url ?? "").trim());
+    if (fromUrl) return fromUrl;
+
+    const o = String(p.repo_owner ?? "").trim();
+    const r = String(p.repo_name ?? "").trim();
+    if (o && r) return { owner: o, repo: r.replace(/\.git$/i, "") };
+
+    const body = String(p.body ?? "");
+    const line = body
+        .split(/\r?\n/)
+        .find((l) => /^\s*repository\s*:/i.test(l));
+    if (line) {
+        const rest = line.replace(/^\s*repository\s*:\s*/i, "").trim();
+        if (rest && rest !== "unknown") {
+            const parsed = parseRepoRef(rest);
+            if (parsed) return parsed;
+        }
+    }
+    return null;
+}
+
 function parseRepoRef(repoUrl: string): { owner: string; repo: string } | null {
     const t = repoUrl.trim();
     if (!t) return null;
@@ -59,13 +88,12 @@ export async function POST(request: NextRequest) {
     }
 
     const p = dispatch_payload as Record<string, unknown>;
-    const repoUrl = String(p.repo_url ?? "").trim();
-    const parsed = parseRepoRef(repoUrl);
+    const parsed = resolveOwnerRepoFromPayload(p);
     if (!parsed) {
         return NextResponse.json(
             {
                 error:
-                    "dispatch_payload.repo_url must be owner/repo or a https://github.com/... URL",
+                    "Could not resolve GitHub owner/repo: set dispatch_payload.repo_url (e.g. owner/repo), or repo_owner + repo_name, or a Repository: line in dispatch_payload.body",
             },
             { status: 400 }
         );

@@ -591,11 +591,16 @@ class StoreFixRequest(BaseModel):
 @app.post("/store-fix")
 async def store_fix(request: StoreFixRequest):
     """Store a successful fix + test plan in the vector DB for future RAG retrieval."""
+    import asyncio
+
     from memory.store import store_fix_from_api, store_test_plan
 
     data = request.model_dump()
-    fix_stored = store_fix_from_api(data)
-    plan_stored = store_test_plan(data)
+    # Run both embeddings+inserts in parallel — halves wall time vs sequential calls.
+    fix_stored, plan_stored = await asyncio.gather(
+        asyncio.to_thread(store_fix_from_api, data),
+        asyncio.to_thread(store_test_plan, data),
+    )
 
     return {
         "fix_stored": fix_stored,

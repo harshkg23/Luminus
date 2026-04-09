@@ -9,6 +9,20 @@ from graph.state import SentinelState
 
 logger = logging.getLogger(__name__)
 
+# Cap text sent to OpenAI embeddings (full fields still stored on the document where applicable)
+_MAX_FIX_EMBED_CHARS = 14_000
+_MAX_PATCH_EMBED_CHARS = 6_000
+_MAX_TEST_PLAN_EMBED_CHARS = 8_000
+
+
+def _truncate_for_embed(s: str | None, max_chars: int) -> str:
+    if not s:
+        return ""
+    t = str(s)
+    if len(t) <= max_chars:
+        return t
+    return t[:max_chars] + "\n… (truncated for embedding)"
+
 
 def store_successful_fix(state: SentinelState) -> None:
     """Store a successful healer fix in the vector DB for RAG retrieval."""
@@ -77,9 +91,10 @@ def store_fix_from_api(data: dict[str, Any]) -> bool:
         # Build embedding text from the most relevant fields
         text_parts = [
             data.get("rca_type", ""),
-            data.get("rca_report", ""),
-            data.get("proposed_fix", ""),
-            data.get("git_diff", ""),
+            _truncate_for_embed(str(data.get("rca_report", "")), 6_000),
+            _truncate_for_embed(str(data.get("proposed_fix", "")), 4_000),
+            _truncate_for_embed(str(data.get("git_diff", "")), 8_000),
+            _truncate_for_embed(str(data.get("proposed_patch", "")), _MAX_PATCH_EMBED_CHARS),
             str(data.get("changed_files", [])),
         ]
         # Include error messages from failed tests for better similarity matching
@@ -89,6 +104,7 @@ def store_fix_from_api(data: dict[str, Any]) -> bool:
                 text_parts.append(tr.get("name", ""))
 
         text = "\n".join(filter(None, text_parts))
+        text = _truncate_for_embed(text, _MAX_FIX_EMBED_CHARS)
 
         embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
         embedding_vector = embeddings.embed_documents([text])[0]
@@ -152,8 +168,8 @@ def store_test_plan(data: dict[str, Any]) -> bool:
 
         text = "\n".join(filter(None, [
             str(data.get("changed_files", [])),
-            data.get("git_diff", "")[:3000],
-            data.get("test_plan", ""),
+            _truncate_for_embed(str(data.get("git_diff", "")), 3_000),
+            _truncate_for_embed(str(data.get("test_plan", "")), _MAX_TEST_PLAN_EMBED_CHARS),
         ]))
 
         embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
