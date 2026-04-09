@@ -20,17 +20,28 @@ const initialSnapshot = (): PipelineSnapshot => ({
   updatedAt: Date.now(),
 });
 
-let snapshot: PipelineSnapshot = initialSnapshot();
+const globalForPipeline = globalThis as unknown as {
+  __pipelineSnapshot: PipelineSnapshot;
+  __pipelineListeners: Set<() => void>;
+};
 
-const listeners = new Set<() => void>();
+if (!globalForPipeline.__pipelineSnapshot) {
+  globalForPipeline.__pipelineSnapshot = initialSnapshot();
+}
+if (!globalForPipeline.__pipelineListeners) {
+  globalForPipeline.__pipelineListeners = new Set();
+}
+
+const getSnapshotRef = () => globalForPipeline.__pipelineSnapshot;
+const getListenersRef = () => globalForPipeline.__pipelineListeners;
 
 export function getPipelineSnapshot(): PipelineSnapshot {
-  return JSON.parse(JSON.stringify(snapshot)) as PipelineSnapshot;
+  return JSON.parse(JSON.stringify(getSnapshotRef())) as PipelineSnapshot;
 }
 
 function emit() {
-  snapshot.updatedAt = Date.now();
-  listeners.forEach((fn) => {
+  getSnapshotRef().updatedAt = Date.now();
+  getListenersRef().forEach((fn) => {
     try {
       fn();
     } catch {
@@ -40,27 +51,28 @@ function emit() {
 }
 
 export function subscribePipeline(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
+  getListenersRef().add(listener);
+  return () => getListenersRef().delete(listener);
 }
 
 function pushLog(level: PipelineSnapshot["logs"][0]["level"], message: string, step?: string) {
-  snapshot.logs.push({
+  const snap = getSnapshotRef();
+  snap.logs.push({
     ts: new Date().toISOString(),
     level,
     message,
     step,
   });
-  if (snapshot.logs.length > 500) snapshot.logs.splice(0, snapshot.logs.length - 500);
+  if (snap.logs.length > 500) snap.logs.splice(0, snap.logs.length - 500);
 }
 
 /** Edge target `to` is considered completed for glow when this returns true. */
 export function isStepCompleted(step: keyof PipelineSnapshot["steps"]): boolean {
-  return snapshot.steps[step] === "completed";
+  return getSnapshotRef().steps[step] === "completed";
 }
 
 export function resetPipeline(): void {
-  snapshot = initialSnapshot();
+  globalForPipeline.__pipelineSnapshot = initialSnapshot();
   pushLog("info", "Pipeline reset — waiting for agents.");
   emit();
 }
@@ -107,8 +119,10 @@ export function applyPipelineWebhook(body: WebhookBody): { ok: true } | { ok: fa
   const step = body.step as keyof PipelineSnapshot["steps"] | undefined;
   const status = body.status;
 
-  if (step && status && step in snapshot.steps) {
-    snapshot.steps[step] = status;
+  const snap = getSnapshotRef();
+
+  if (step && status && step in snap.steps) {
+    snap.steps[step] = status;
     if (!body.message) {
       pushLog(
         status === "failed" ? "error" : status === "running" ? "info" : "success",
@@ -118,17 +132,17 @@ export function applyPipelineWebhook(body: WebhookBody): { ok: true } | { ok: fa
     }
 
     if (step === "tests_gate" && status === "completed") {
-      if (body.path === "courier") snapshot.afterTests = "courier";
-      else if (body.path === "watchdog") snapshot.afterTests = "watchdog";
-      else if (body.branch === "success") snapshot.afterTests = "courier";
-      else if (body.branch === "failure") snapshot.afterTests = "watchdog";
+      if (body.path === "courier") snap.afterTests = "courier";
+      else if (body.path === "watchdog") snap.afterTests = "watchdog";
+      else if (body.branch === "success") snap.afterTests = "courier";
+      else if (body.branch === "failure") snap.afterTests = "watchdog";
     }
 
     if (step === "confidence_gate" && status === "completed") {
-      if (body.outcome === "ship") snapshot.afterConfidence = "ship";
-      else if (body.outcome === "block") snapshot.afterConfidence = "block";
-      else if (body.branch === "success") snapshot.afterConfidence = "ship";
-      else if (body.branch === "failure") snapshot.afterConfidence = "block";
+      if (body.outcome === "ship") snap.afterConfidence = "ship";
+      else if (body.outcome === "block") snap.afterConfidence = "block";
+      else if (body.branch === "success") snap.afterConfidence = "ship";
+      else if (body.branch === "failure") snap.afterConfidence = "block";
     }
 
     notifyPipelineSlack({

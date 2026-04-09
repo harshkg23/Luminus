@@ -19,6 +19,7 @@ import { TestRunner } from "./test-runner";
 import { sessionManager } from "./session-manager";
 import { CourierAgent, CourierResult } from "./courier";
 import { emitSessionEvent } from "../websocket/server";
+import { applyPipelineWebhook } from "../pipeline/state";
 import { aiEngine } from "./ai-engine-client";
 import type { HealerOnlyResult } from "./ai-engine-client";
 import { generateTestFiles, buildPRBody } from "./test-writer";
@@ -102,6 +103,9 @@ export class AgentOrchestrator {
         });
         await sessionManager.updateStatus(sessionId, "running");
 
+        // Reset the SSE pipeline state so the dashboard starts fresh
+        applyPipelineWebhook({ action: "reset" });
+
         // Emit pipeline started
         emitSessionEvent(sessionId, "pipeline.started", {
           session_id: sessionId, status: "started", timestamp: ts(),
@@ -114,12 +118,14 @@ export class AgentOrchestrator {
 
         // ── Step 1: Read code from GitHub ───────────────────────────────────
         console.log("📦 Step 1: Reading code from GitHub...");
+        applyPipelineWebhook({ step: "code_push", status: "running", message: "Reading repository code from GitHub" });
         emitSessionEvent(sessionId, "agent.started", {
           session_id: sessionId, agent_name: "architect", status: "started", message: "Reading repository code", timestamp: ts(),
         });
         await sessionManager.updateAgentStatus(sessionId, "architect", "running");
         const codeContext = await this.readRepoCode();
         console.log(`   ✅ Got code context (${codeContext.length} chars)\n`);
+        applyPipelineWebhook({ step: "code_push", status: "completed", message: `Got code context (${codeContext.length} chars)` });
         await sessionManager.updateAgentStatus(sessionId, "architect", "success");
 
         // ── Step 1b: Fetch PR diff (needed by both test planner and healer) ──
@@ -139,6 +145,7 @@ export class AgentOrchestrator {
 
         // ── Step 2: Generate test plan from PR diff + code context ───────────
         console.log("🧠 Step 2: AI Agent analyzing PR and generating test plan...");
+        applyPipelineWebhook({ step: "architect", status: "running", message: `Analyzing ${effectiveFiles.length} changed files + generating tests` });
         emitSessionEvent(sessionId, "agent.started", {
           session_id: sessionId, agent_name: "scripter", status: "started",
           message: `Analyzing ${effectiveFiles.length} changed files + generating tests`, timestamp: ts(),
@@ -177,6 +184,7 @@ export class AgentOrchestrator {
             testPlan = this.generateTestPlan(codeContext);
         }
 
+        applyPipelineWebhook({ step: "architect", status: "completed", message: `Test plan: ${testPlan.split("\n").length} lines` });
         emitSessionEvent(sessionId, "agent.completed", {
           session_id: sessionId, agent_name: "scripter", status: "completed", message: `Generated ${testPlan.split("\n").length} lines`, timestamp: ts(),
         });
@@ -184,6 +192,7 @@ export class AgentOrchestrator {
 
         // ── Step 3: Execute tests via Playwright MCP ────────────────────────
         console.log("🎭 Step 3: Executing tests via Playwright MCP...");
+        applyPipelineWebhook({ step: "scripter", status: "running", message: "Executing tests via Playwright MCP" });
         emitSessionEvent(sessionId, "agent.started", {
           session_id: sessionId, agent_name: "playwright", status: "started", message: "Running tests in browser", timestamp: ts(),
         });
@@ -206,6 +215,12 @@ export class AgentOrchestrator {
         await sessionManager.setOutput(sessionId, results);
 
         console.log(`   ✅ Tests completed: ${results.passed}/${results.total} passed\n`);
+        applyPipelineWebhook({ step: "scripter", status: "completed", message: `Tests: ${results.passed}/${results.total} passed` });
+        applyPipelineWebhook({
+          step: "tests_gate", status: "completed",
+          message: results.failed > 0 ? `${results.failed} failures → routing to Healer` : `All ${results.total} tests passed`,
+          path: results.failed > 0 ? "watchdog" : "courier",
+        });
 
         emitSessionEvent(sessionId, "session.status_changed", {
           session_id: sessionId, status: results.failed > 0 ? "failed" : "completed", timestamp: ts(),
@@ -215,6 +230,7 @@ export class AgentOrchestrator {
         let healerOutput: HealerOnlyResult | null = null;
         if (results.failed > 0 && aiEngine.isConnected) {
             console.log("🩺 Step 4: Healer agent running RCA via LangGraph...");
+            applyPipelineWebhook({ step: "healer", status: "running", message: "Running root cause analysis via LangGraph" });
             emitSessionEvent(sessionId, "agent.started", {
               session_id: sessionId, agent_name: "healer", status: "started",
               message: "Running root cause analysis", timestamp: ts(),
@@ -259,6 +275,7 @@ export class AgentOrchestrator {
                     if (healerOutput.proposed_fix) {
                         console.log(`   💡 Proposed fix: ${healerOutput.proposed_fix.substring(0, 120)}...`);
                     }
+                    applyPipelineWebhook({ step: "healer", status: "completed", message: `RCA: ${healerOutput.rca_type} (confidence ${healerOutput.confidence_score})` });
                     emitSessionEvent(sessionId, "agent.completed", {
                       session_id: sessionId, agent_name: "healer", status: "completed",
                       message: `RCA: ${healerOutput.rca_type} (confidence ${healerOutput.confidence_score})`,
@@ -268,6 +285,7 @@ export class AgentOrchestrator {
                 }
             } catch (healerErr) {
                 console.warn(`   ⚠️  Healer failed: ${(healerErr as Error).message}`);
+                applyPipelineWebhook({ step: "healer", status: "failed", message: `Healer error: ${(healerErr as Error).message}` });
                 await sessionManager.updateAgentStatus(sessionId, "healer", "error");
             }
         }
@@ -292,6 +310,7 @@ export class AgentOrchestrator {
             await sessionManager.updateAgentStatus(sessionId, "watchdog", "success");
 
             console.log("📨 Step 5: Courier agent reporting failures...");
+            applyPipelineWebhook({ step: "courier", status: "running", message: "Reporting failures via GitHub Issue" });
             await sessionManager.updateAgentStatus(sessionId, "courier", "running");
             const courier = new CourierAgent(this.config.githubToken);
             try {
@@ -322,8 +341,10 @@ export class AgentOrchestrator {
                     `   ✅ Courier: Created ${courierResult.type} ${courierResult.url ?? ""}\n`
                 );
                 if (courierResult.success) {
+                    applyPipelineWebhook({ step: "courier", status: "completed", message: `Created ${courierResult.type}: ${courierResult.url ?? ""}` });
                     await sessionManager.updateAgentStatus(sessionId, "courier", "success");
                 } else {
+                    applyPipelineWebhook({ step: "courier", status: "failed", message: "Courier failed to create report" });
                     await sessionManager.updateAgentStatus(sessionId, "courier", "error");
                 }
             } catch (courierErr) {
@@ -358,7 +379,9 @@ export class AgentOrchestrator {
                 }
             }
         } else {
+            applyPipelineWebhook({ step: "courier", status: "running", message: "All tests passed — sending success report" });
             await sessionManager.updateAgentStatus(sessionId, "courier", "running");
+            applyPipelineWebhook({ step: "courier", status: "completed", message: "All tests passed" });
             await sessionManager.updateAgentStatus(sessionId, "courier", "success");
         }
 
