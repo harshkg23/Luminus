@@ -309,9 +309,9 @@ export class AgentOrchestrator {
             );
             await sessionManager.updateAgentStatus(sessionId, "watchdog", "success");
 
-            console.log("📨 Step 5: Courier agent reporting failures...");
-            applyPipelineWebhook({ step: "courier", status: "running", message: "Reporting failures via GitHub Issue" });
-            await sessionManager.updateAgentStatus(sessionId, "courier", "running");
+            console.log("📨 Step 5: Watchdog agent reporting failures...");
+            applyPipelineWebhook({ step: "watchdog", status: "running", message: "Reporting failures via GitHub Issue" });
+            await sessionManager.updateAgentStatus(sessionId, "watchdog", "running");
             const courier = new CourierAgent(this.config.githubToken);
             try {
                 const failedTests = results.results
@@ -341,15 +341,15 @@ export class AgentOrchestrator {
                     `   ✅ Courier: Created ${courierResult.type} ${courierResult.url ?? ""}\n`
                 );
                 if (courierResult.success) {
-                    applyPipelineWebhook({ step: "courier", status: "completed", message: `Created ${courierResult.type}: ${courierResult.url ?? ""}` });
-                    await sessionManager.updateAgentStatus(sessionId, "courier", "success");
+                    applyPipelineWebhook({ step: "watchdog", status: "completed", message: `Created issue: ${courierResult.url ?? ""}` });
+                    await sessionManager.updateAgentStatus(sessionId, "watchdog", "success");
                 } else {
-                    applyPipelineWebhook({ step: "courier", status: "failed", message: "Courier failed to create report" });
-                    await sessionManager.updateAgentStatus(sessionId, "courier", "error");
+                    applyPipelineWebhook({ step: "watchdog", status: "failed", message: "Watchdog failed to create report" });
+                    await sessionManager.updateAgentStatus(sessionId, "watchdog", "error");
                 }
             } catch (courierErr) {
-                console.warn(`   ⚠️  Courier failed: ${(courierErr as Error).message}`);
-                await sessionManager.updateAgentStatus(sessionId, "courier", "error");
+                console.warn(`   ⚠️  Watchdog failed: ${(courierErr as Error).message}`);
+                await sessionManager.updateAgentStatus(sessionId, "watchdog", "error");
             } finally {
                 await courier.stop();
             }
