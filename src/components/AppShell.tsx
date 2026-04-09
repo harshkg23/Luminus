@@ -6,7 +6,7 @@ import Sidebar from "./Sidebar";
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  if (pathname === "/" || pathname.startsWith("/auth")) return <>{children}</>;
+  if (pathname === "/" || pathname?.startsWith("/auth")) return <>{children}</>;
   /* All protected routes get sidebar + layout */
   return <ProtectedShell>{children}</ProtectedShell>;
 }
