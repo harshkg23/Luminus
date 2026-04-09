@@ -44,28 +44,38 @@ def store_successful_fix(state: SentinelState) -> None:
             str(state.get("changed_files", [])),
         ])
 
+        from langchain_text_splitters import RecursiveCharacterTextSplitter
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1500, chunk_overlap=150, separators=["\n\n", "\n", " ", ""]
+        )
+        chunks = text_splitter.split_text(text)[:10]
+
         embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
-        embedding_vector = embeddings.embed_documents([text])[0]
+        embedding_vectors = embeddings.embed_documents(chunks)
 
         client = pymongo.MongoClient(mongodb_uri)
         collection = client["tollgate"]["healer_memory"]
 
-        doc = {
-            "embedding": embedding_vector,
-            "rca_type": str(state.get("rca_type", "")),
-            "rca_report": str(state.get("rca_report", "")),
-            "proposed_fix": str(state.get("proposed_fix", "")),
-            "proposed_patch": str(state.get("proposed_patch", "")),
-            "file_edits": state.get("file_edits", []),
-            "target_files": state.get("target_files", []),
-            "fix_branch": str(state.get("fix_branch", "")),
-            "confidence_score": float(state.get("confidence_score", 0.0)),
-            "repo_url": str(state.get("repo_url", "")),
-            "created_at": datetime.datetime.utcnow(),
-        }
+        docs = []
+        for vec in embedding_vectors:
+            docs.append({
+                "embedding": vec,
+                "rca_type": str(state.get("rca_type", "")),
+                "rca_report": str(state.get("rca_report", "")),
+                "proposed_fix": str(state.get("proposed_fix", "")),
+                "proposed_patch": str(state.get("proposed_patch", "")),
+                "file_edits": state.get("file_edits", []),
+                "target_files": state.get("target_files", []),
+                "fix_branch": str(state.get("fix_branch", "")),
+                "confidence_score": float(state.get("confidence_score", 0.0)),
+                "repo_url": str(state.get("repo_url", "")),
+                "session_id": str(state.get("session_id", "internal_healer_run")),
+                "created_at": datetime.datetime.utcnow(),
+            })
 
-        collection.insert_one(doc)
-        logger.info("store_successful_fix: stored fix rca_type=%s repo=%s", doc["rca_type"], doc["repo_url"])
+        if docs:
+            collection.insert_many(docs)
+        logger.info("store_successful_fix: stored %d chunk(s) fix rca_type=%s repo=%s", len(docs), state.get("rca_type", ""), state.get("repo_url", ""))
 
     except Exception as exc:
         logger.error("store_successful_fix: failed — %s: %s", exc.__class__.__name__, exc)
@@ -104,47 +114,55 @@ def store_fix_from_api(data: dict[str, Any]) -> bool:
                 text_parts.append(tr.get("name", ""))
 
         text = "\n".join(filter(None, text_parts))
-        text = _truncate_for_embed(text, _MAX_FIX_EMBED_CHARS)
+        
+        from langchain_text_splitters import RecursiveCharacterTextSplitter
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1500, chunk_overlap=150, separators=["\n\n", "\n", " ", ""]
+        )
+        chunks = text_splitter.split_text(text)[:15]
 
         embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
-        embedding_vector = embeddings.embed_documents([text])[0]
+        embedding_vectors = embeddings.embed_documents(chunks)
 
         client = pymongo.MongoClient(mongodb_uri)
         collection = client["tollgate"]["healer_memory"]
 
-        doc = {
-            "embedding": embedding_vector,
-            "rca_type": data.get("rca_type", ""),
-            "rca_report": data.get("rca_report", ""),
-            "proposed_fix": data.get("proposed_fix", ""),
-            "proposed_patch": data.get("proposed_patch", ""),
-            "file_edits": data.get("file_edits", []),
-            "target_files": data.get("target_files", []),
-            "fix_branch": data.get("fix_branch", ""),
-            "confidence_score": float(data.get("confidence_score", 0.0)),
-            "repo_url": data.get("repo_url", ""),
-            "changed_files": data.get("changed_files", []),
-            "test_plan": data.get("test_plan", ""),
-            "test_results_summary": {
-                "total": data.get("total_tests", 0),
-                "passed": data.get("passed_tests", 0),
-                "failed": data.get("failed_tests_count", 0),
-            },
-            "failed_test_errors": [
-                {"name": t.get("name", ""), "error": t.get("error", "")}
-                for t in (data.get("failed_tests", []) or [])[:10]
-                if isinstance(t, dict)
-            ],
-            "pr_url": data.get("pr_url", ""),
-            "pr_number": data.get("pr_number"),
-            "session_id": data.get("session_id", ""),
-            "created_at": datetime.datetime.utcnow(),
-        }
+        docs = []
+        for vec in embedding_vectors:
+            docs.append({
+                "embedding": vec,
+                "rca_type": data.get("rca_type", ""),
+                "rca_report": data.get("rca_report", ""),
+                "proposed_fix": data.get("proposed_fix", ""),
+                "proposed_patch": data.get("proposed_patch", ""),
+                "file_edits": data.get("file_edits", []),
+                "target_files": data.get("target_files", []),
+                "fix_branch": data.get("fix_branch", ""),
+                "confidence_score": float(data.get("confidence_score", 0.0)),
+                "repo_url": data.get("repo_url", ""),
+                "changed_files": data.get("changed_files", []),
+                "test_plan": data.get("test_plan", ""),
+                "test_results_summary": {
+                    "total": data.get("total_tests", 0),
+                    "passed": data.get("passed_tests", 0),
+                    "failed": data.get("failed_tests_count", 0),
+                },
+                "failed_test_errors": [
+                    {"name": t.get("name", ""), "error": t.get("error", "")}
+                    for t in (data.get("failed_tests", []) or [])[:10]
+                    if isinstance(t, dict)
+                ],
+                "pr_url": data.get("pr_url", ""),
+                "pr_number": data.get("pr_number"),
+                "session_id": data.get("session_id", ""),
+                "created_at": datetime.datetime.utcnow(),
+            })
 
-        collection.insert_one(doc)
+        if docs:
+            collection.insert_many(docs)
         logger.info(
-            "store_fix_from_api: stored fix session=%s rca=%s repo=%s",
-            doc["session_id"], doc["rca_type"], doc["repo_url"],
+            "store_fix_from_api: stored %d chunk(s) fix session=%s rca=%s repo=%s",
+            len(docs), data.get("session_id"), data.get("rca_type", ""), data.get("repo_url", ""),
         )
         return True
 
@@ -168,29 +186,38 @@ def store_test_plan(data: dict[str, Any]) -> bool:
 
         text = "\n".join(filter(None, [
             str(data.get("changed_files", [])),
-            _truncate_for_embed(str(data.get("git_diff", "")), 3_000),
-            _truncate_for_embed(str(data.get("test_plan", "")), _MAX_TEST_PLAN_EMBED_CHARS),
+            _truncate_for_embed(str(data.get("git_diff", "")), 4_000),
+            str(data.get("test_plan", "")),
         ]))
 
+        from langchain_text_splitters import RecursiveCharacterTextSplitter
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1500, chunk_overlap=150, separators=["\n\n", "\n", " ", ""]
+        )
+        chunks = text_splitter.split_text(text)[:10]
+
         embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
-        embedding_vector = embeddings.embed_documents([text])[0]
+        embedding_vectors = embeddings.embed_documents(chunks)
 
         client = pymongo.MongoClient(mongodb_uri)
         collection = client["tollgate"]["architect_memory"]
 
-        doc = {
-            "embedding": embedding_vector,
-            "test_plan": data.get("test_plan", ""),
-            "changed_files": data.get("changed_files", []),
-            "repo_url": data.get("repo_url", ""),
-            "total_tests": data.get("total_tests", 0),
-            "passed_tests": data.get("passed_tests", 0),
-            "session_id": data.get("session_id", ""),
-            "created_at": datetime.datetime.utcnow(),
-        }
+        docs = []
+        for vec in embedding_vectors:
+            docs.append({
+                "embedding": vec,
+                "test_plan": data.get("test_plan", ""),
+                "changed_files": data.get("changed_files", []),
+                "repo_url": data.get("repo_url", ""),
+                "total_tests": data.get("total_tests", 0),
+                "passed_tests": data.get("passed_tests", 0),
+                "session_id": data.get("session_id", ""),
+                "created_at": datetime.datetime.utcnow(),
+            })
 
-        collection.insert_one(doc)
-        logger.info("store_test_plan: stored plan session=%s repo=%s", doc["session_id"], doc["repo_url"])
+        if docs:
+            collection.insert_many(docs)
+        logger.info("store_test_plan: stored %d chunk(s) plan session=%s repo=%s", len(docs), data.get("session_id", ""), data.get("repo_url", ""))
         return True
 
     except Exception as exc:

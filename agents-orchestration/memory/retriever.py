@@ -53,8 +53,20 @@ def get_similar_past_fixes(
         ]
 
         results = list(collection.aggregate(pipeline))
-        logger.info("get_similar_past_fixes: retrieved %d similar fix(es).", len(results))
-        return results
+        
+        # Deduplicate by session_id in case chunked documents were stored
+        unique_results = []
+        seen = set()
+        for r in results:
+            sid = r.get("session_id")
+            if sid and sid in seen:
+                continue
+            if sid:
+                seen.add(sid)
+            unique_results.append(r)
+            
+        logger.info("get_similar_past_fixes: retrieved %d unique similar fix(es).", len(unique_results))
+        return unique_results
 
     except Exception as exc:
         logger.warning("get_similar_past_fixes: failed — %s: %s", exc.__class__.__name__, exc)
@@ -102,8 +114,19 @@ def get_similar_past_test_plans(
         ]
 
         results = list(collection.aggregate(pipeline))
-        logger.info("get_similar_past_test_plans: retrieved %d plan(s).", len(results))
-        return results
+        
+        unique_results = []
+        seen = set()
+        for r in results:
+            sid = r.get("session_id")
+            if sid and sid in seen:
+                continue
+            if sid:
+                seen.add(sid)
+            unique_results.append(r)
+            
+        logger.info("get_similar_past_test_plans: retrieved %d unique plan(s).", len(unique_results))
+        return unique_results
 
     except Exception as exc:
         logger.warning("get_similar_past_test_plans: failed — %s: %s", exc.__class__.__name__, exc)
