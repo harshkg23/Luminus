@@ -33,6 +33,9 @@ interface TollGatePipelineResult {
   pr?: { url?: string; number?: number; files?: string[] };
 }
 
+/** PR picker: how many rows per page (all PRs are loaded; this only paginates the list UI). */
+const PR_LIST_PAGE_SIZE = 15;
+
 const emptySnapshot = (): PipelineSnapshot => ({
   steps: {
     code_push: "idle",
@@ -114,6 +117,8 @@ export default function ReposPage() {
   const [runningPipeline, setRunningPipeline] = useState(false);
   const [error, setError] = useState("");
   const [pullRequests, setPullRequests] = useState<PullRequestSummary[]>([]);
+  /** Client-side page over loaded PRs (API returns all open PRs). */
+  const [prListPage, setPrListPage] = useState(1);
   const [selectedPr, setSelectedPr] = useState<number | null>(null);
   const [result, setResult] = useState<TollGatePipelineResult | null>(null);
 
@@ -121,6 +126,13 @@ export default function ReposPage() {
     () => pullRequests.find((pr) => pr.number === selectedPr) ?? null,
     [pullRequests, selectedPr],
   );
+
+  const prListTotalPages = Math.max(1, Math.ceil(pullRequests.length / PR_LIST_PAGE_SIZE));
+  const pagedPullRequests = useMemo(() => {
+    const page = Math.min(prListPage, prListTotalPages);
+    const start = (page - 1) * PR_LIST_PAGE_SIZE;
+    return pullRequests.slice(start, start + PR_LIST_PAGE_SIZE);
+  }, [pullRequests, prListPage, prListTotalPages]);
 
   async function loadPullRequestsFor(o: string, r: string) {
     if (!o.trim() || !r.trim()) return;
@@ -134,6 +146,7 @@ export default function ReposPage() {
       if (!res.ok) throw new Error(data?.error ?? "Failed to load pull requests.");
       const prs = (data.pullRequests ?? []) as PullRequestSummary[];
       setPullRequests(prs);
+      setPrListPage(1);
       setSelectedPr(prs[0]?.number ?? null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Request failed");
@@ -390,11 +403,34 @@ export default function ReposPage() {
 
           {pullRequests.length > 0 ? (
             <div className="space-y-3">
-              <p className="font-mono text-[10px] text-fg-4 uppercase tracking-widest">
-                Select PR ({pullRequests.length} open)
-              </p>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="font-mono text-[10px] text-fg-4 uppercase tracking-widest">
+                  Select PR ({pullRequests.length} open — page {Math.min(prListPage, prListTotalPages)}/
+                  {prListTotalPages})
+                </p>
+                {prListTotalPages > 1 ? (
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      disabled={prListPage <= 1}
+                      onClick={() => setPrListPage((p) => Math.max(1, p - 1))}
+                      className="font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded border border-[var(--bd)] bg-[var(--bg-elevated)] text-fg-2 hover:border-[var(--bd-2)] disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      Prev
+                    </button>
+                    <button
+                      type="button"
+                      disabled={prListPage >= prListTotalPages}
+                      onClick={() => setPrListPage((p) => Math.min(prListTotalPages, p + 1))}
+                      className="font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded border border-[var(--bd)] bg-[var(--bg-elevated)] text-fg-2 hover:border-[var(--bd-2)] disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      Next
+                    </button>
+                  </div>
+                ) : null}
+              </div>
               <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
-                {pullRequests.slice(0, 20).map((pr) => (
+                {pagedPullRequests.map((pr) => (
                   <button
                     key={pr.number}
                     type="button"
