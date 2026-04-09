@@ -55,8 +55,8 @@ export default function SignInPage() {
 function SignInForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const callbackUrl = searchParams.get("callbackUrl") ?? "/dashboard";
-  const urlError = searchParams.get("error");
+  const callbackUrl = searchParams?.get("callbackUrl") ?? "/dashboard";
+  const urlError = searchParams?.get("error");
 
   const [email, setEmail]       = useState("");
   const [password, setPassword] = useState("");
