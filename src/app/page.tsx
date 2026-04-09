@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState, useEffect } from "react";
+import { useSession, signOut } from "next-auth/react";
 
 /* ── tiny animated counter ── */
 function Counter({ to, suffix = "" }: { to: number; suffix?: string }) {
@@ -44,6 +45,7 @@ const DIFF_LINES = [
 ];
 
 export default function LandingPage() {
+  const { data: session } = useSession();
   const [activeStep, setActiveStep] = useState(0);
 
   useEffect(() => {
@@ -81,20 +83,41 @@ export default function LandingPage() {
 
           {/* CTA — far right */}
           <div className="flex items-center gap-3">
-            <Link
-              href="/auth/signin"
-              className="text-sm font-medium transition-colors"
-              style={{ color: "var(--fg-3)" }}
-            >
-              Login
-            </Link>
-            <Link
-              href="/dashboard"
-              className="px-4 py-1.5 rounded-lg text-sm font-bold text-white kinetic-gradient transition-all hover:brightness-110 active:scale-95"
-              style={{ boxShadow: "0 0 18px color-mix(in srgb, var(--accent) 30%, transparent)" }}
-            >
-              Get Started
-            </Link>
+            {session ? (
+              <>
+                <button
+                  onClick={() => signOut({ callbackUrl: "/" })}
+                  className="text-sm font-medium transition-colors hover:text-neg"
+                  style={{ color: "var(--fg-3)" }}
+                >
+                  Logout
+                </button>
+                <Link
+                  href="/dashboard"
+                  className="px-4 py-1.5 rounded-lg text-sm font-bold text-white kinetic-gradient transition-all hover:brightness-110 active:scale-95"
+                  style={{ boxShadow: "0 0 18px color-mix(in srgb, var(--accent) 30%, transparent)" }}
+                >
+                  Dashboard
+                </Link>
+              </>
+            ) : (
+              <>
+                <Link
+                  href="/auth/signin"
+                  className="text-sm font-medium transition-colors"
+                  style={{ color: "var(--fg-3)" }}
+                >
+                  Login
+                </Link>
+                <Link
+                  href="/auth/signin"
+                  className="px-4 py-1.5 rounded-lg text-sm font-bold text-white kinetic-gradient transition-all hover:brightness-110 active:scale-95"
+                  style={{ boxShadow: "0 0 18px color-mix(in srgb, var(--accent) 30%, transparent)" }}
+                >
+                  Get Started
+                </Link>
+              </>
+            )}
           </div>
         </div>
       </nav>

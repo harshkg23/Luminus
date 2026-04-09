@@ -80,30 +80,21 @@ export default function TopBar({ center, activeLabel }: TopBarProps) {
         </button>
 
         {/* Avatar + dropdown */}
-        <div className="relative ml-1" ref={menuRef}>
+        <div className="relative ml-4 flex items-center gap-3">
           <button
-            onClick={() => setMenuOpen((o) => !o)}
+            onClick={() => signOut({ callbackUrl: "/" })}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-mono font-bold text-neg hover:bg-neg/10 transition-colors"
+          >
+            <span className="material-symbols-outlined" style={{ fontSize: "15px" }}>logout</span>
+            Logout
+          </button>
+
+          <button
             title={userName}
-            className="w-7 h-7 rounded-full bg-[var(--accent-soft)] border border-[var(--bd-2)] flex items-center justify-center font-mono text-[9px] font-bold text-accent hover:border-accent hover:bg-accent/20 transition-all"
+            className="w-7 h-7 rounded-full bg-[var(--accent-soft)] border border-[var(--bd-2)] flex items-center justify-center font-mono text-[9px] font-bold text-accent hover:border-accent hover:bg-accent/20 transition-all cursor-default"
           >
             {initials}
           </button>
-
-          {menuOpen && (
-            <div className="absolute right-0 top-9 z-50 w-52 rounded-xl border border-[var(--bd-2)] bg-[var(--bg-surface)] shadow-xl overflow-hidden">
-              <div className="px-4 py-3 border-b border-[var(--bd)]">
-                <p className="font-mono text-[11px] font-bold text-fg-1 truncate">{session?.user?.name ?? "User"}</p>
-                <p className="font-mono text-[10px] text-fg-4 truncate mt-0.5">{session?.user?.email ?? ""}</p>
-              </div>
-              <button
-                onClick={() => signOut({ callbackUrl: "/auth" })}
-                className="w-full flex items-center gap-2 px-4 py-2.5 font-mono text-[11px] text-neg hover:bg-neg/10 transition-colors"
-              >
-                <span className="material-symbols-outlined" style={{ fontSize: "15px" }}>logout</span>
-                Sign out
-              </button>
-            </div>
-          )}
         </div>
       </div>
     </header>

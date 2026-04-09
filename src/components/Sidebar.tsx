@@ -71,14 +71,9 @@ export default function Sidebar() {
         })}
       </nav>
 
-      {/* Deploy CTA */}
+      {/* User row */}
       <div className="space-y-3 pt-3 border-t border-[var(--bd)]">
-        <button className="w-full kinetic-gradient text-white py-2.5 rounded-lg font-mono font-bold text-[11px] uppercase tracking-tighter hover:opacity-90 active:scale-95 transition-all shadow-[0_4px_15px_var(--accent-soft)]">
-          Deploy Agent
-        </button>
-
-        {/* User row */}
-        <div className="flex items-center gap-2.5 px-1 pt-2 border-t border-[var(--bd)]">
+        <div className="flex items-center gap-2.5 px-1 pt-2">
           {session?.user?.image ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
