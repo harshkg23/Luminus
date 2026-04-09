@@ -22,7 +22,7 @@ import { emitSessionEvent } from "../websocket/server";
 import { applyPipelineWebhook } from "../pipeline/state";
 import { aiEngine } from "./ai-engine-client";
 import type { HealerOnlyResult } from "./ai-engine-client";
-import { generateTestFiles, buildPRBody } from "./test-writer";
+import { generateTestFiles, buildPRBody, buildTollgateSelectedPrComment } from "./test-writer";
 import type { PRBodyOptions } from "./test-writer";
 import { applyFileEdits, applyPatchToExistingBranch } from "../courier/apply-patch";
 import {
@@ -389,7 +389,10 @@ export class AgentOrchestrator {
         let prResult: { url?: string; number?: number; files: string[] } | undefined;
         let postFixResults: import("./types").TestRunOutput | null = null;
         const hasFileEdits = (healerOutput?.file_edits?.length ?? 0) > 0 && (healerOutput?.confidence_score ?? 0) > 0.5;
-        const hasHealerFix = hasFileEdits || (healerOutput?.proposed_patch?.trim() && (healerOutput?.confidence_score ?? 0) > 0.5);
+        const hasHealerFix = Boolean(
+            hasFileEdits ||
+                (Boolean(healerOutput?.proposed_patch?.trim()) && (healerOutput?.confidence_score ?? 0) > 0.5)
+        );
         try {
             console.log("📝 Step 6: Writing tests & fixes, opening unified PR...");
             emitSessionEvent(sessionId, "agent.started", {
@@ -431,6 +434,7 @@ export class AgentOrchestrator {
                 targetBranch,
                 originalChangedFiles: prChangedFiles.length > 0 ? prChangedFiles : undefined,
                 issueNumber: courierResult?.number,
+                targetUrl: this.config.targetUrl,
             };
             const prBody = buildPRBody(sessionId, testPlan, results, testFiles, codeContext.length, healerOutput, prBodyOptions, postFixResults);
 
@@ -618,27 +622,18 @@ export class AgentOrchestrator {
                 ?? process.env.GITHUB_PAT ?? "";
             if (ghToken) {
                 try {
-                    let commentBody: string;
-                    if (hasHealerFix && postFixResults) {
-                        commentBody = `### 🛡️ TollGate — Fix Ready\n\n`
-                          + `Fix PR: ${prResult.url}\n\n`
-                          + `| | Before Fix | After Fix |\n`
-                          + `|--|-----------|----------|\n`
-                          + `| Passed | ${results.passed}/${results.total} | **${postFixResults.passed}/${postFixResults.total}** |\n`
-                          + `| Failed | ${results.failed} | **${postFixResults.failed}** |\n\n`
-                          + (postFixResults.failed === 0
-                              ? `✅ **All tests pass after the fix.** Please review and merge.`
-                              : `⚠️ **${postFixResults.failed} test(s) still failing.** Manual review recommended.`);
-                    } else if (hasHealerFix) {
-                        commentBody = `### 🛡️ TollGate — Fix Ready\n\n`
-                          + `Fix PR: ${prResult.url}\n\n`
-                          + `Found **${results.failed}** failing test(s). The Healer agent generated code fixes.\n`
-                          + `Please review the fix PR and merge if the changes look correct.`;
-                    } else {
-                        commentBody = `### 🛡️ TollGate — Tests Generated\n\n`
-                          + `Test PR: ${prResult.url}\n\n`
-                          + `Results: **${results.passed}/${results.total}** tests passed.`;
-                    }
+                    const commentBody = buildTollgateSelectedPrComment({
+                        originalPrNumber: this.config.selectedPr.number,
+                        fixPrUrl: prResult.url,
+                        fixPrNumber: prResult.number,
+                        sessionId,
+                        targetUrl: this.config.targetUrl,
+                        preResults: results,
+                        postResults: postFixResults,
+                        healer: healerOutput,
+                        changedFiles: prChangedFiles,
+                        testPlanPreview: testPlan?.trim() || undefined,
+                    });
 
                     const commentRes = await fetch(
                         `https://api.github.com/repos/${this.config.owner}/${this.config.repo}/issues/${this.config.selectedPr.number}/comments`,

@@ -23,6 +23,28 @@ interface TestSuite {
   steps: string[];
 }
 
+/** Safe inside HTML tags (<summary>, etc.). */
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/**
+ * Markdown fence long enough that interior ``` sequences cannot close it early.
+ * Unterminated fences inside `<details>` were swallowing the rest of GitHub PR bodies.
+ */
+function wrapInCodeFence(content: string, info = ""): string {
+  const runs = content.match(/`+/g) ?? [];
+  const maxRun = runs.reduce((m, r) => Math.max(m, r.length), 0);
+  const fenceLen = Math.max(3, maxRun + 1);
+  const tick = "`".repeat(fenceLen);
+  const opener = info ? `${tick}${info}\n` : `${tick}\n`;
+  return `${opener}${content}\n${tick}`;
+}
+
 // ── Test Code Generator ─────────────────────────────────────────────────────
 
 /**
@@ -211,6 +233,94 @@ export interface PRBodyOptions {
   originalChangedFiles?: string[];
   /** Issue number created by the Courier for this failure (links PR to issue) */
   issueNumber?: number;
+  /** Base URL Playwright used for E2E (for transparency & env review) */
+  targetUrl?: string;
+}
+
+/**
+ * Shared security + coding-practice guidance for TollGate PR bodies and PR comments.
+ * `heading` is the markdown heading prefix for each subsection (e.g. `###` on fix PRs, `####` under a top-level comment).
+ */
+export function tollgateReviewGuidanceMarkdown(
+  changedFiles: string[],
+  opts: { targetUrl?: string; heading: "###" | "####" }
+): string {
+  const h = opts.heading;
+  const lines: string[] = [];
+  const target = opts.targetUrl?.trim();
+
+  lines.push(`${h} 🧭 Review scope (tests vs. security vs. quality)`);
+  lines.push(``);
+  lines.push(`| Area | What TollGate automated | What to verify manually |`);
+  lines.push(`|------|-------------------------|-------------------------|`);
+  lines.push(`| **Tests / E2E** | Playwright steps against \`TOLLGATE_TARGET_URL\` | Flakiness, coverage gaps, CI, different browsers/envs |`);
+  lines.push(
+    `| **Security / vulns** | PR-scoped checklist below (not SAST) | Secret scanning, SAST/DAST, dependency audit, threat modeling |`
+  );
+  lines.push(`| **Coding practices** | Maintainability checklist below | Team standards, perf profiling, architecture fit |`);
+  lines.push(``);
+  if (target) {
+    lines.push(`E2E ran against: \`${target}\`. If this is not the same deployment as production, results may not reflect real auth, CSP, or API behavior.`);
+    lines.push(``);
+  }
+
+  lines.push(`${h} 🔐 Security, vulnerabilities & unsafe patterns (PR-scoped)`);
+  lines.push(``);
+  lines.push(
+    `TollGate E2E **does not** replace SAST, DAST, or secret scanners. Use this section with the **files in scope** to steer human review.`
+  );
+  lines.push(``);
+  if (changedFiles.length) {
+    lines.push(`**Files in scope (original PR + Healer targets; see full diff on GitHub):**`);
+    lines.push(``);
+    for (const f of changedFiles) {
+      lines.push(`- \`${f}\``);
+    }
+    lines.push(``);
+    lines.push(`**Review checklist for these paths:**`);
+    lines.push(``);
+    lines.push(
+      `- **XSS / DOM**: avoid \`dangerouslySetInnerHTML\` with untrusted strings, URL/query/\`localStorage\` HTML without sanitization (e.g. DOMPurify).`
+    );
+    lines.push(`- **Secrets**: no API keys or tokens in source, accidental env exposure, or \`console.log\` of credentials.`);
+    lines.push(
+      `- **Injection & unsafe dynamic code**: \`eval\`, \`new Function\`, unsanitized \`innerHTML\`, or \`JSON.parse\` on unvalidated remote/user input.`
+    );
+    lines.push(
+      `- **Auth / session / routing**: protected routes, redirects, and CSRF-relevant flows — confirm behavior when E2E hits your real app URL${target ? ` (\`${target}\`)` : ""}.`
+    );
+    lines.push(`- **Dependencies**: risky transitive packages, outdated majors with known CVEs — run your usual audit (\`npm audit\`, Dependabot, etc.).`);
+    lines.push(``);
+  } else {
+    lines.push(`_No scoped file list in metadata — use the **Files changed** tab on this PR._`);
+    lines.push(``);
+    lines.push(`**General checklist:** XSS/DOM sinks, secrets, injection, auth/session, dependency CVEs (same bullets as above).`);
+    lines.push(``);
+  }
+
+  lines.push(`${h} 📐 Coding practices & quality (maintainability)`);
+  lines.push(``);
+  lines.push(
+    `- **Performance**: avoid heavy synchronous work in render; reduce unnecessary re-renders; profile before blanket memoization.`
+  );
+  lines.push(
+    `- **React / hooks**: complete dependency arrays; avoid stale closures; cancel or ignore stale async work (\`AbortController\` / flags) where appropriate.`
+  );
+  lines.push(
+    `- **Type safety & data**: narrow \`any\`; validate external/API JSON (schema or \`try/catch\` + guards).`
+  );
+  lines.push(
+    `- **Routing & UX**: consistent paths (\`/dashboard\` vs \`/\`), loading and error states, so E2E and users see the same UI.`
+  );
+  lines.push(
+    `- **Accessibility**: semantic headings, labels, focus order, and stable \`data-testid\` only where tests need hooks (prefer accessible names).`
+  );
+  lines.push(
+    `- **Generated tests**: specs under \`tests/e2e/\` are AI-produced — treat like any other contrib: naming, stability, and duplication.`
+  );
+  lines.push(``);
+
+  return lines.join("\n");
 }
 
 export function buildPRBody(
@@ -236,6 +346,9 @@ export function buildPRBody(
   lines.push(``);
   lines.push(`**Session**: \`${sessionId}\``);
   lines.push(`**Generated**: ${new Date().toISOString()}`);
+  if (prOptions?.targetUrl?.trim()) {
+    lines.push(`**E2E target URL**: \`${prOptions.targetUrl.trim()}\``);
+  }
   if (prOptions?.originalPrNumber) {
     lines.push(`**Testing PR**: #${prOptions.originalPrNumber}${prOptions.originalPrTitle ? ` — ${prOptions.originalPrTitle}` : ""}`);
   }
@@ -396,35 +509,6 @@ export function buildPRBody(
     lines.push(``);
   }
 
-  // Failed test details with errors (from pre-fix or only run)
-  const sourceResults = postFixResults ?? results;
-  const failures = sourceResults.results.filter((r) => r.status === "failed");
-  if (failures.length > 0) {
-    lines.push(`### 🔍 Failure Details`);
-    lines.push(``);
-    for (const f of failures) {
-      lines.push(`<details>`);
-      lines.push(`<summary>❌ ${f.name}</summary>`);
-      lines.push(``);
-      if (f.error) {
-        lines.push(`**Error**: \`${f.error}\``);
-        lines.push(``);
-      }
-      if (f.accessibility_snapshot) {
-        lines.push(`**Page Snapshot** (accessibility tree at time of failure):`);
-        lines.push(``);
-        const snap = f.accessibility_snapshot.length > 2000
-          ? f.accessibility_snapshot.substring(0, 2000) + "\n... (truncated)"
-          : f.accessibility_snapshot;
-        lines.push("```yaml");
-        lines.push(snap);
-        lines.push("```");
-      }
-      lines.push(`</details>`);
-      lines.push(``);
-    }
-  }
-
   // Pipeline steps
   lines.push(`### 🔄 Pipeline Steps`);
   lines.push(``);
@@ -441,6 +525,21 @@ export function buildPRBody(
   }
   lines.push(``);
 
+  const scopeForReview = [
+    ...new Set(
+      [...(prOptions?.originalChangedFiles ?? []), ...fixedFiles, ...(healerResult?.target_files ?? [])].filter(
+        Boolean
+      ) as string[]
+    ),
+  ];
+  lines.push(
+    tollgateReviewGuidanceMarkdown(scopeForReview, {
+      targetUrl: prOptions?.targetUrl,
+      heading: "###",
+    })
+  );
+  lines.push(``);
+
   // Generated files listing
   lines.push(`### 📁 Generated Test Files`);
   lines.push(``);
@@ -449,11 +548,42 @@ export function buildPRBody(
   }
   lines.push(``);
 
-  // Test plan (collapsed)
+  // Failure details after pipeline / review — avoids burying those sections when HTML+fences break
+  const sourceResults = postFixResults ?? results;
+  const failures = sourceResults.results.filter((r) => r.status === "failed");
+  if (failures.length > 0) {
+    lines.push(`### 🔍 Failure Details`);
+    lines.push(``);
+    for (const f of failures) {
+      lines.push(`<details>`);
+      lines.push(`<summary>${escapeHtml(`❌ ${f.name ?? "Step failed"}`)}</summary>`);
+      lines.push(``);
+      if (f.error) {
+        lines.push(`**Error**`);
+        lines.push(``);
+        lines.push(wrapInCodeFence(f.error, ""));
+        lines.push(``);
+      }
+      if (f.accessibility_snapshot) {
+        lines.push(`**Page Snapshot** (accessibility tree at time of failure):`);
+        lines.push(``);
+        const snap =
+          f.accessibility_snapshot.length > 2000
+            ? f.accessibility_snapshot.substring(0, 2000) + "\n... (truncated)"
+            : f.accessibility_snapshot;
+        lines.push(wrapInCodeFence(snap, "yaml"));
+        lines.push(``);
+      }
+      lines.push(`</details>`);
+      lines.push(``);
+    }
+  }
+
+  // Test plan (collapsed) — must use extended fence so inner ``` cannot terminate the PR body early
   lines.push(`<details>`);
   lines.push(`<summary>📝 AI-Generated Test Plan</summary>`);
   lines.push(``);
-  lines.push(testPlan);
+  lines.push(wrapInCodeFence(testPlan, ""));
   lines.push(``);
   lines.push(`</details>`);
   lines.push(``);
@@ -465,6 +595,204 @@ export function buildPRBody(
   } else {
     lines.push(`*This PR was created automatically by the TollGate pipeline. Tests were generated by the AI Architect agent and executed via Playwright MCP.*`);
   }
+  lines.push(
+    `*Tune **\`TOLLGATE_TARGET_URL\`** so E2E matches the app and environment you care about (wrong host/port skews routing, auth, and security-relevant behavior).*`
+  );
+
+  return lines.join("\n");
+}
+
+// ── Selected PR thread comment (rich report for original PR) ─────────────
+
+export interface TollgateSelectedPrCommentInput {
+  /** PR that was analyzed (the one we comment on) */
+  originalPrNumber: number;
+  fixPrUrl: string;
+  fixPrNumber?: number;
+  sessionId: string;
+  targetUrl: string;
+  preResults: TestRunOutput;
+  /** Present when tests were re-run after healer/review fixes */
+  postResults: TestRunOutput | null;
+  healer: HealerOnlyResult | null;
+  /** Paths from PR diff — scope for security/practices narrative */
+  changedFiles?: string[];
+  /** First lines of the Architect test plan (optional) */
+  testPlanPreview?: string;
+}
+
+function stepStatusIcon(status: string): string {
+  if (status === "passed") return "✅";
+  if (status === "failed") return "❌";
+  return "⏭️";
+}
+
+function formatTestStepsTable(results: TestRunOutput, maxErrorLen = 400): string {
+  const rows = results.results.map((r, i) => {
+    const err = (r.error ?? "").replace(/\r/g, "").replace(/\n/g, " ").trim();
+    const errShort = err.length > maxErrorLen ? `${err.slice(0, maxErrorLen)}…` : err;
+    const name = (r.name ?? `Step ${i + 1}`).replace(/\|/g, "\\|");
+    return `| ${i + 1} | ${stepStatusIcon(r.status)} **${r.status}** | ${name} | ${errShort || "—"} | ${r.duration_ms}ms |`;
+  });
+  return [
+    "| # | Status | Step | Error (short) | ms |",
+    "|---|--------|------|---------------|-----|",
+    ...rows,
+  ].join("\n");
+}
+
+const MAX_RCA_COMMENT = 6000;
+const MAX_PLAN_PREVIEW_COMMENT = 3500;
+
+/**
+ * Full markdown for the GitHub comment on the **selected** PR (overview thread).
+ * Covers E2E tests, Healer RCA, and structured security / practices guidance for this PR.
+ */
+export function buildTollgateSelectedPrComment(opts: TollgateSelectedPrCommentInput): string {
+  const {
+    originalPrNumber,
+    fixPrUrl,
+    fixPrNumber,
+    sessionId,
+    targetUrl,
+    preResults,
+    postResults,
+    healer,
+    changedFiles = [],
+    testPlanPreview,
+  } = opts;
+
+  const lines: string[] = [];
+
+  lines.push(`### 🛡️ TollGate — full report for PR #${originalPrNumber}`);
+  lines.push(``);
+  lines.push(
+    `This comment summarizes what TollGate did for **this PR**: browser E2E results, regression analysis (Healer), and review-focused notes on **security**, **vulnerabilities**, and **coding practices** for the files in scope.`
+  );
+  lines.push(``);
+  lines.push(`| Field | Value |`);
+  lines.push(`|-------|-------|`);
+  lines.push(`| **Fix / test PR** | ${fixPrUrl}${fixPrNumber != null ? ` (#${fixPrNumber})` : ""} |`);
+  lines.push(`| **Session** | \`${sessionId}\` |`);
+  lines.push(`| **App URL used for E2E** | \`${targetUrl}\` |`);
+  lines.push(`| **Baseline E2E** | ${preResults.passed}/${preResults.total} passed, ${preResults.failed} failed (${preResults.duration_ms}ms) |`);
+  if (postResults) {
+    lines.push(
+      `| **After automated fix PR** | ${postResults.passed}/${postResults.total} passed, ${postResults.failed} failed (${postResults.duration_ms}ms) |`
+    );
+  }
+  lines.push(``);
+
+  lines.push(`#### 📊 E2E comparison`);
+  lines.push(``);
+  if (postResults) {
+    lines.push(`| Metric | Before (this PR head) | After (fix PR workflow) |`);
+    lines.push(`|--------|------------------------|---------------------------|`);
+    lines.push(`| Passed | ${preResults.passed}/${preResults.total} | **${postResults.passed}/${postResults.total}** |`);
+    lines.push(`| Failed | ${preResults.failed} | **${postResults.failed}** |`);
+    lines.push(``);
+    if (postResults.failed === 0) {
+      lines.push(`✅ All planned E2E steps passed after the fix workflow.`);
+    } else {
+      lines.push(
+        `⚠️ **${postResults.failed}** E2E step(s) still failing after the fix workflow — compare step tables below and review the fix PR.`
+      );
+    }
+  } else {
+    lines.push(`| Metric | Value |`);
+    lines.push(`|--------|-------|`);
+    lines.push(`| Passed | ${preResults.passed}/${preResults.total} |`);
+    lines.push(`| Failed | ${preResults.failed} |`);
+    lines.push(``);
+    if (preResults.failed > 0) {
+      lines.push(
+        `Healer proposed changes on the linked fix PR; post-fix verification was not available for this comment.`
+      );
+    }
+  }
+  lines.push(``);
+
+  lines.push(`##### Baseline — every E2E step`);
+  lines.push(``);
+  lines.push(`<details>`);
+  lines.push(`<summary>Open step-by-step results (before fix workflow)</summary>`);
+  lines.push(``);
+  lines.push(formatTestStepsTable(preResults));
+  lines.push(``);
+  lines.push(`</details>`);
+  lines.push(``);
+
+  if (postResults && postResults.results?.length) {
+    lines.push(`##### After fix — every E2E step`);
+    lines.push(``);
+    lines.push(`<details>`);
+    lines.push(`<summary>Open step-by-step results (after fix workflow)</summary>`);
+    lines.push(``);
+    lines.push(formatTestStepsTable(postResults));
+    lines.push(``);
+    lines.push(`</details>`);
+    lines.push(``);
+  }
+
+  lines.push(`#### 🩺 Healer — tests & regression (what broke and what was proposed)`);
+  lines.push(``);
+  if (healer) {
+    const conf = ((healer.confidence_score ?? 0) * 100).toFixed(0);
+    lines.push(`| | |`);
+    lines.push(`|--|--|`);
+    lines.push(`| **RCA type** | \`${healer.rca_type ?? "unknown"}\` |`);
+    lines.push(`| **Confidence** | ${conf}% |`);
+    if (healer.target_files?.length) {
+      lines.push(`| **Target files** | ${healer.target_files.map((f) => `\`${f}\``).join(", ")} |`);
+    }
+    lines.push(``);
+    const rca = (healer.rca_report ?? "").trim();
+    if (rca) {
+      lines.push(`**Analysis (root cause)**`);
+      lines.push(``);
+      lines.push(rca.length > MAX_RCA_COMMENT ? `${rca.slice(0, MAX_RCA_COMMENT)}\n\n_(truncated)_` : rca);
+      lines.push(``);
+    }
+    const fix = (healer.proposed_fix ?? "").trim();
+    if (fix) {
+      lines.push(`**Proposed remedy**`);
+      lines.push(``);
+      lines.push(fix.length > MAX_RCA_COMMENT ? `${fix.slice(0, MAX_RCA_COMMENT)}\n\n_(truncated)_` : fix);
+      lines.push(``);
+    }
+    const edits = healer.file_edits?.length ?? 0;
+    const patch = healer.proposed_patch?.trim() ? "yes" : "no";
+    lines.push(`- Automated edits in Healer output: **${edits}** file edit(s), unified diff proposal: **${patch}**`);
+    lines.push(``);
+  } else {
+    lines.push(
+      `_No Healer run for this session (all E2E passed, or AI engine unavailable)._`
+    );
+    lines.push(``);
+  }
+
+  lines.push(
+    tollgateReviewGuidanceMarkdown(changedFiles, { targetUrl, heading: "####" })
+  );
+  lines.push(``);
+
+  if (testPlanPreview?.trim()) {
+    lines.push(`#### 🧪 Test plan excerpt (Architect)`);
+    lines.push(``);
+    lines.push(`<details>`);
+    lines.push(`<summary>Preview of generated E2E plan</summary>`);
+    lines.push(``);
+    const pv = testPlanPreview.trim();
+    lines.push(pv.length > MAX_PLAN_PREVIEW_COMMENT ? `${pv.slice(0, MAX_PLAN_PREVIEW_COMMENT)}\n\n_(truncated)_` : pv);
+    lines.push(``);
+    lines.push(`</details>`);
+    lines.push(``);
+  }
+
+  lines.push(`---`);
+  lines.push(
+    `*Generated by TollGate — E2E via Playwright MCP, analysis via Healer. Tune **\`TOLLGATE_TARGET_URL\`** so E2E targets the same app as this repo.*`
+  );
 
   return lines.join("\n");
 }

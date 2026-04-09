@@ -43,6 +43,16 @@ def courier_execute_node(state: SentinelState) -> dict[str, object]:
         head_branch = dispatch_payload.get("head_branch")
         proposed_patch = dispatch_payload.get("proposed_patch")
 
+        if not head_branch or not (proposed_patch and str(proposed_patch).strip()):
+            dispatch_action = "create_issue"
+            dispatch_payload["title"] = "[Courier] " + dispatch_payload.get("title", "")
+            dispatch_payload["body"] = (
+                "**Note**: `create_pr` was requested but `head_branch` or `proposed_patch` was missing — opened as issue instead.\n\n"
+                + str(dispatch_payload.get("body", ""))
+            )
+            state["dispatch_action"] = dispatch_action
+            state["dispatch_payload"] = dispatch_payload
+
         if head_branch and proposed_patch:
             repo_root = Path(__file__).resolve().parents[2]
             patch_path = ""

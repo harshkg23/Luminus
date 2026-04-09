@@ -242,7 +242,7 @@ export class AIEngineClient {
         failed_tests: data.failedTests ?? [],
         pr_url: data.prUrl ?? "",
         pr_number: data.prNumber,
-      }, 30_000);
+      }, 120_000);
     } catch (err) {
       console.error("[AI Engine] storeFixInRAG failed:", err);
       return { fix_stored: false, plan_stored: false };
