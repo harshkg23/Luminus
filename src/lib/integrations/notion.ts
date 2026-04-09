@@ -1,7 +1,7 @@
 import "server-only";
 import { Client, APIErrorCode, isNotionClientError } from "@notionhq/client";
 
-export type NotionAgent = "pipeline" | "reviewer" | "courier";
+export type NotionAgent = "pipeline" | "reviewer" | "courier" | "architect" | "scripter" | "watchdog" | "healer";
 export type NotionEvent =
   | "Pipeline Start"
   | "Pipeline Complete"
