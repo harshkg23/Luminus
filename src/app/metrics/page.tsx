@@ -25,6 +25,14 @@ const POLL_MS = 10_000;
 const MAX_SPARK = 30;
 const GRAFANA_URL = "http://localhost:3001";
 
+/** When `tollgate_pipeline_duration_seconds_bucket` has no data yet, show this illustrative shape (same bucket count as `BUCKETS` below). */
+const DEMO_PIPELINE_DURATION_BARS = [1, 2.5, 5, 12, 18, 9, 4, 1.5, 0.5];
+/** Fallback agent latencies (seconds) when Prometheus has no `agent` step samples (Next.js flow often omits scripter/courier). */
+const DEMO_AGENT_LATENCY_SEC: Record<string, number> = {
+  scripter: 38,
+  courier: 11,
+};
+
 /* ═══════════════════════════════════════════════════════════════════════════
    Pure helpers
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -119,20 +127,46 @@ function StatCard({ label, value, sub, subColor, icon, spark, sparkColor }: {
 function BarChart({ data, labels, color = "var(--accent)", h = 180 }: {
   data: number[]; labels?: string[]; color?: string; h?: number;
 }) {
-  const max = Math.max(...data, 1);
+  const max = Math.max(...data, 1e-9);
+  /** Reserve space for x-axis labels so bar heights use pixel math (percent heights broke inside flex columns). */
+  const labelBand = 20;
+  const plotH = Math.max(h - labelBand, 40);
+
   return (
-    <div className="flex items-end gap-1 w-full" style={{ height: h }}>
-      {data.map((v, i) => (
-        <div key={i} className="flex-1 flex flex-col items-center gap-1 group relative">
-          <div className="w-full rounded-t-sm transition-all hover:opacity-80 cursor-pointer relative"
-            style={{ height: `${Math.max((v / max) * 100, 1)}%`, background: `color-mix(in srgb, ${color} 25%, transparent)` }}>
-            <div className="absolute top-0 w-full h-0.5 rounded-full" style={{ background: color }} />
-            <div className="absolute -top-7 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity rounded px-1.5 py-0.5 text-[9px] font-mono whitespace-nowrap z-10"
-              style={{ background: "var(--bg-elevated)", border: "1px solid var(--bd)", color: "var(--fg-2)" }}>{v.toFixed(1)}</div>
+    <div className="flex gap-1.5 w-full items-stretch" style={{ height: h }}>
+      {data.map((v, i) => {
+        const barPx = Math.max((v / max) * plotH, v > 0 ? 4 : 0);
+        return (
+          <div
+            key={i}
+            className="flex-1 flex flex-col justify-end items-stretch min-w-0 group relative"
+            style={{ height: h }}
+          >
+            <div className="relative w-full flex flex-col justify-end flex-1 min-h-0">
+              <div
+                className="w-full rounded-t-sm transition-all hover:opacity-90 cursor-pointer relative shrink-0"
+                style={{
+                  height: barPx,
+                  background: `color-mix(in srgb, ${color} 28%, transparent)`,
+                  borderBottom: `2px solid ${color}`,
+                }}
+              >
+                <div className="absolute -top-6 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity rounded px-1.5 py-0.5 text-[9px] font-mono whitespace-nowrap z-10 pointer-events-none"
+                  style={{ background: "var(--bg-elevated)", border: "1px solid var(--bd)", color: "var(--fg-2)" }}>
+                  {v.toFixed(1)}
+                </div>
+              </div>
+            </div>
+            {labels?.[i] ? (
+              <span className="text-[8px] font-mono text-center leading-tight pt-1 truncate w-full" style={{ color: "var(--fg-4)" }}>
+                {labels[i]}
+              </span>
+            ) : (
+              <span className="pt-1" style={{ height: labelBand }} />
+            )}
           </div>
-          {labels?.[i] && <span className="text-[8px] font-mono" style={{ color: "var(--fg-4)" }}>{labels[i]}</span>}
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -153,27 +187,43 @@ function AgentLatency({ m }: { m: MetricsMap }) {
         {agents.map((a) => {
           const count = mv(m, "tollgate_agent_step_duration_seconds_count", { agent: a });
           const sum = mv(m, "tollgate_agent_step_duration_seconds_sum", { agent: a });
-          const avg = count > 0 ? sum / count : 0;
+          const demoSec = DEMO_AGENT_LATENCY_SEC[a];
+          const hasProm = count > 0;
+          const useDemoFallback = !hasProm && demoSec !== undefined;
+          const avg = hasProm ? sum / count : useDemoFallback ? demoSec : 0;
           const pct = Math.min((avg / 60) * 100, 100);
+          const barColor = avg > 30 ? "var(--warn)" : "var(--accent)";
           return (
             <div key={a} className="space-y-1.5">
-              <div className="flex justify-between font-mono text-[11px]">
+              <div className="flex justify-between items-center gap-2 font-mono text-[11px]">
                 <span style={{ color: "var(--fg-3)" }} className="capitalize">{a}</span>
-                <span style={{ color: avg > 30 ? "var(--warn)" : "var(--accent)" }} className="font-bold">
-                  {count > 0 ? fmtDur(avg) : "—"}
+                <span className="flex items-center gap-1.5">
+                  {useDemoFallback ? (
+                    <span className="font-mono text-[8px] uppercase tracking-wider px-1 py-px rounded" style={{ color: "var(--fg-4)", border: "1px solid var(--bd)" }}>
+                      demo
+                    </span>
+                  ) : null}
+                  <span style={{ color: barColor }} className="font-bold">
+                    {hasProm || useDemoFallback ? fmtDur(avg) : "—"}
+                  </span>
                 </span>
               </div>
               <div className="w-full rounded-full h-1 overflow-hidden" style={{ background: "var(--bg-elevated)" }}>
                 <div className="h-full rounded-full transition-all duration-700"
-                  style={{ width: `${pct}%`, background: avg > 30 ? "var(--warn)" : "var(--accent)" }} />
+                  style={{ width: `${hasProm || useDemoFallback ? pct : 0}%`, background: barColor }} />
               </div>
             </div>
           );
         })}
-        <div className="pt-3 mt-2 border-t flex items-center justify-between font-mono text-[10px] uppercase tracking-widest"
+        <div className="pt-3 mt-2 border-t flex flex-col gap-1 font-mono text-[10px] uppercase tracking-widest"
           style={{ borderColor: "var(--bd)", color: "var(--fg-4)" }}>
-          <span>Source</span>
-          <span className="font-bold" style={{ color: "var(--fg-1)" }}>Prometheus</span>
+          <div className="flex items-center justify-between w-full">
+            <span>Source</span>
+            <span className="font-bold" style={{ color: "var(--fg-1)" }}>Prometheus</span>
+          </div>
+          <p className="normal-case tracking-normal text-[9px] leading-snug" style={{ color: "var(--fg-4)" }}>
+            Scripter &amp; Courier show demo latency when the engine has not emitted step metrics for those agents.
+          </p>
         </div>
       </div>
     </div>
@@ -393,6 +443,7 @@ export default function MetricsPage() {
   );
   const diffData = bucketData.map((v, i) => (i === 0 ? v : Math.max(0, v - bucketData[i - 1])));
   const hasHistogram = diffData.some((v) => v > 0);
+  const histogramBars = hasHistogram ? diffData : DEMO_PIPELINE_DURATION_BARS;
 
   /* metric count */
   const metricCount = Object.keys(m).length;
@@ -479,20 +530,23 @@ export default function MetricsPage() {
             {/* Chart + Latency */}
             <div className="grid grid-cols-12 gap-6">
               <section className="col-span-12 lg:col-span-8 glass-panel p-6 rounded-xl">
-                <div className="flex justify-between items-center mb-6">
+                <div className="flex justify-between items-center mb-6 flex-wrap gap-2">
                   <h2 className="font-headline text-base font-semibold flex items-center gap-2" style={{ color: "var(--fg-1)" }}>
                     <span className="material-symbols-outlined" style={{ fontSize: 18, color: "var(--accent)" }}>query_stats</span>
                     Pipeline Duration Distribution
                   </h2>
+                  {!hasHistogram ? (
+                    <span className="font-mono text-[8px] uppercase tracking-wider px-2 py-1 rounded" style={{ color: "var(--fg-4)", border: "1px solid var(--bd)" }}>
+                      demo preview
+                    </span>
+                  ) : null}
                 </div>
-                {hasHistogram ? (
-                  <BarChart data={diffData} labels={bucketLabels} color="var(--accent)" h={220} />
-                ) : (
-                  <div className="flex flex-col items-center justify-center gap-2" style={{ height: 220, color: "var(--fg-4)" }}>
-                    <span className="material-symbols-outlined" style={{ fontSize: 36, opacity: 0.2 }}>bar_chart</span>
-                    <p className="font-mono text-[10px]">Run a pipeline to see duration histogram</p>
-                  </div>
-                )}
+                <BarChart data={histogramBars} labels={bucketLabels} color="var(--accent)" h={220} />
+                {!hasHistogram ? (
+                  <p className="font-mono text-[9px] mt-3" style={{ color: "var(--fg-4)" }}>
+                    Illustrative shape until live histogram buckets populate (e.g. after <code className="text-fg-3">pipeline_duration_ms</code> on <code className="text-fg-3">/store-fix</code>).
+                  </p>
+                ) : null}
               </section>
               <div className="col-span-12 lg:col-span-4">
                 <AgentLatency m={m} />

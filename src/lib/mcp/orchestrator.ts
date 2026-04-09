@@ -94,6 +94,7 @@ export class AgentOrchestrator {
         console.log("\n🚀 Starting TollGate Pipeline...\n");
 
         const sessionId = this.config.sessionId ?? `pipeline_${Date.now()}`;
+        const pipelineStartedAt = Date.now();
         const ts = () => new Date().toISOString();
 
         await sessionManager.createSession({
@@ -690,6 +691,7 @@ export class AgentOrchestrator {
                 failedTests: failedSteps,
                 prUrl: prResult.url,
                 prNumber: prResult.number,
+                pipelineDurationMs: Date.now() - pipelineStartedAt,
             }).then(ragRes => {
                 console.log(`   ✅ RAG storage: fix=${ragRes.fix_stored}, plan=${ragRes.plan_stored}`);
             }).catch(err => {

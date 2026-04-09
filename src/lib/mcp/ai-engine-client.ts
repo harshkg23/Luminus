@@ -211,6 +211,8 @@ export class AIEngineClient {
     failedTests?: { name: string; error: string }[];
     prUrl?: string;
     prNumber?: number;
+    /** Full TollGate run wall time (ms) — recorded on AI Engine Prometheus pipeline duration */
+    pipelineDurationMs?: number;
   }): Promise<{ fix_stored: boolean; plan_stored: boolean }> {
     if (!this.baseUrl) {
       console.warn("[AI Engine] storeFixInRAG: AI_ENGINE_URL not set, skipping.");
@@ -242,6 +244,7 @@ export class AIEngineClient {
         failed_tests: data.failedTests ?? [],
         pr_url: data.prUrl ?? "",
         pr_number: data.prNumber,
+        pipeline_duration_ms: data.pipelineDurationMs,
       }, 120_000);
     } catch (err) {
       console.error("[AI Engine] storeFixInRAG failed:", err);

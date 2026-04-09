@@ -372,8 +372,9 @@ async def generate_test_plan(request: GenerateTestPlanRequest):
         TEST_PLAN_DURATION.observe(elapsed)
         AGENT_STEP_DURATION.labels(agent="architect").observe(elapsed)
         rag_matches = int(result.get("rag_architect_matches", 0))
+        # Count every Architect invocation (vector search may return 0 matches)
+        RAG_QUERIES.labels(agent="architect").inc()
         if rag_matches > 0:
-            RAG_QUERIES.labels(agent="architect").inc()
             RAG_MATCHES.labels(agent="architect").observe(rag_matches)
 
         # Detect if we used mock or real LLM
@@ -516,8 +517,8 @@ async def run_healer(request: RunHealerRequest):
             HEALER_CONFIDENCE.set(float(confidence))
         HEALER_RUNS.labels(decision=decision).inc()
         rag_matches = int(result.get("rag_healer_matches", 0))
+        RAG_QUERIES.labels(agent="healer").inc()
         if rag_matches > 0:
-            RAG_QUERIES.labels(agent="healer").inc()
             RAG_MATCHES.labels(agent="healer").observe(rag_matches)
 
         raw_edits = result.get("file_edits") or []
@@ -586,6 +587,8 @@ class StoreFixRequest(BaseModel):
     failed_tests: list[dict[str, Any]] = []
     pr_url: str = ""
     pr_number: int | None = None
+    # Wall-clock ms for full Next.js TollGate run (optional) — feeds pipeline duration histogram
+    pipeline_duration_ms: int | None = None
 
 
 @app.post("/store-fix")
@@ -596,6 +599,21 @@ async def store_fix(request: StoreFixRequest):
     from memory.store import store_fix_from_api, store_test_plan
 
     data = request.model_dump()
+
+    # Next.js orchestrator does not call POST /run-pipeline; record the same counters here
+    # so /metrics reflects Repos → Start pipeline runs (Playwright totals + completion).
+    passed = int(request.passed_tests or 0)
+    failed = int(request.failed_tests_count or 0)
+    total = int(request.total_tests or (passed + failed))
+    if total > 0:
+        TESTS_TOTAL.labels(result="passed").inc(passed)
+        TESTS_TOTAL.labels(result="failed").inc(failed)
+        TESTS_PER_RUN.observe(total)
+    status = "completed" if failed == 0 else "failed"
+    PIPELINE_RUNS.labels(status=status).inc()
+    if request.pipeline_duration_ms and request.pipeline_duration_ms > 0:
+        PIPELINE_DURATION.observe(request.pipeline_duration_ms / 1000.0)
+
     # Run both embeddings+inserts in parallel — halves wall time vs sequential calls.
     fix_stored, plan_stored = await asyncio.gather(
         asyncio.to_thread(store_fix_from_api, data),
